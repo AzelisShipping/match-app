@@ -1,109 +1,190 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Tab } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import Papa from 'papaparse';
-import * as XLSX from 'xlsx';
-import _ from 'lodash';
+
+const EditableTable = ({ columns, data, setData }) => {
+  const handlePaste = (e, rowIndex, colIndex) => {
+    e.preventDefault();
+    const pastedText = e.clipboardData.getData('text');
+    const rows = pastedText.split(/\r\n|\n|\r/).filter(row => row.trim());
+    
+    // Split each row by tabs or multiple spaces
+    const pastedData = rows.map(row => row.split(/\t|\s{2,}/));
+    
+    // Update data with pasted content
+    setData(currentData => {
+      const newData = [...currentData];
+      pastedData.forEach((row, i) => {
+        const dataRowIndex = rowIndex + i;
+        // Create new rows if needed
+        while (newData.length <= dataRowIndex) {
+          const emptyRow = {};
+          columns.forEach(col => emptyRow[col.key] = '');
+          newData.push(emptyRow);
+        }
+        
+        row.forEach((cell, j) => {
+          const colKey = columns[colIndex + j]?.key;
+          if (colKey) {
+            newData[dataRowIndex][colKey] = cell.trim();
+          }
+        });
+      });
+      return newData;
+    });
+  };
+
+  const handleCellChange = (rowIndex, column, value) => {
+    setData(currentData => {
+      const newData = [...currentData];
+      newData[rowIndex] = { ...newData[rowIndex], [column.key]: value };
+      return newData;
+    });
+  };
+
+  return (
+    <div className="overflow-x-auto border rounded">
+      <table className="w-full divide-y divide-gray-200">
+        <thead className="bg-gray-50">
+          <tr>
+            {columns.map((column) => (
+              <th 
+                key={column.key}
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+              >
+                {column.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="bg-white divide-y divide-gray-200">
+          {data.map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {columns.map((column, colIndex) => (
+                <td key={column.key} className="px-6 py-2">
+                  <input
+                    type="text"
+                    value={row[column.key] || ''}
+                    onChange={(e) => handleCellChange(rowIndex, column, e.target.value)}
+                    onPaste={(e) => handlePaste(e, rowIndex, colIndex)}
+                    className="w-full border-0 focus:ring-2 focus:ring-blue-500 px-2 py-1"
+                  />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
 
 const MatchApp = () => {
-  // State for file and data
-  const [file, setFile] = useState(null);
-  const [manualMode, setManualMode] = useState(false);
+  // State for each table's data
   const [activeTab, setActiveTab] = useState('azelis');
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [results, setResults] = useState([]);
   
-  // State for manual data entry
-  const [azelisData, setAzelisData] = useState([{ 'Azelis Code': '', 'Description': '' }]);
-  const [supplierData, setSupplierData] = useState([{ 
+  // Create array of 1000 empty rows for each table
+  const createEmptyRows = (template, count = 1000) => 
+    Array(count).fill().map(() => ({...template}));
+
+  const [azelisData, setAzelisData] = useState(createEmptyRows({ 
+    'Azelis Code': '', 'Description': '' 
+  }));
+  
+  const [supplierData, setSupplierData] = useState(createEmptyRows({
     'Supplier Description': '', 'SKU': '', 'Weight': '', 
-    'Price': '', 'From': '', 'To': '' 
-  }]);
-  const [logisticData, setLogisticData] = useState([{
+    'Price': '', 'From': '', 'To': ''
+  }));
+  
+  const [logisticData, setLogisticData] = useState(createEmptyRows({
     'Logistic From': '', 'Logistic To': '', 'Additional Charge': ''
-  }]);
-  const [packweightData, setPackweightData] = useState([{
+  }));
+  
+  const [packweightData, setPackweightData] = useState(createEmptyRows({
     'Pack From': '', 'Pack To': '', 'Additional Charge': ''
-  }]);
+  }));
 
-  // Handle file upload
-  const handleFileChange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    setLoading(true);
-    setError('');
-    
-    try {
-      const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, {
-        cellDates: true,
-        cellNF: true,
-        cellStyles: true
-      });
-
-      const sheets = {};
-      ['Azelis', 'Supplier', 'Logistic', 'PackWeight'].forEach(name => {
-        if (workbook.SheetNames.includes(name)) {
-          sheets[name] = XLSX.utils.sheet_to_json(workbook.Sheets[name]);
-        }
-      });
-
-      processData(sheets);
-    } catch (err) {
-      setError('Error processing file: ' + err.message);
-    } finally {
-      setLoading(false);
+  // Table column definitions
+  const tableDefinitions = {
+    azelis: {
+      columns: [
+        { key: 'Azelis Code', label: 'Azelis Code' },
+        { key: 'Description', label: 'Description' }
+      ]
+    },
+    supplier: {
+      columns: [
+        { key: 'Supplier Description', label: 'Supplier Description' },
+        { key: 'SKU', label: 'SKU' },
+        { key: 'Weight', label: 'Weight' },
+        { key: 'Price', label: 'Price' },
+        { key: 'From', label: 'From' },
+        { key: 'To', label: 'To' }
+      ]
+    },
+    logistic: {
+      columns: [
+        { key: 'Logistic From', label: 'Logistic From' },
+        { key: 'Logistic To', label: 'Logistic To' },
+        { key: 'Additional Charge', label: 'Additional Charge' }
+      ]
+    },
+    packweight: {
+      columns: [
+        { key: 'Pack From', label: 'Pack From' },
+        { key: 'Pack To', label: 'Pack To' },
+        { key: 'Additional Charge', label: 'Additional Charge' }
+      ]
     }
   };
 
-  // Process data from either file or manual entry
-  const processData = (data) => {
-    // Implementation of your Python processing logic
-    // This would need to be adapted from the Python code
-    // For now, just displaying the raw data
-    setResults(data.Azelis || []);
-  };
-
-  // Handle manual data processing
-  const handleManualProcess = () => {
-    const data = {
-      Azelis: azelisData.filter(row => row['Azelis Code'] || row['Description']),
-      Supplier: supplierData.filter(row => Object.values(row).some(v => v)),
-      Logistic: logisticData.filter(row => Object.values(row).some(v => v)),
-      PackWeight: packweightData.filter(row => Object.values(row).some(v => v))
-    };
-    processData(data);
-  };
-
-  // Add row to respective table
-  const addRow = (tableType) => {
-    switch (tableType) {
+  // Add empty row to current table
+  const addRow = () => {
+    const emptyRow = {};
+    tableDefinitions[activeTab].columns.forEach(col => emptyRow[col.key] = '');
+    
+    switch (activeTab) {
       case 'azelis':
-        setAzelisData([...azelisData, { 'Azelis Code': '', 'Description': '' }]);
+        setAzelisData([...azelisData, emptyRow]);
         break;
       case 'supplier':
-        setSupplierData([...supplierData, {
-          'Supplier Description': '', 'SKU': '', 'Weight': '',
-          'Price': '', 'From': '', 'To': ''
-        }]);
+        setSupplierData([...supplierData, emptyRow]);
         break;
       case 'logistic':
-        setLogisticData([...logisticData, {
-          'Logistic From': '', 'Logistic To': '', 'Additional Charge': ''
-        }]);
+        setLogisticData([...logisticData, emptyRow]);
         break;
       case 'packweight':
-        setPackweightData([...packweightData, {
-          'Pack From': '', 'Pack To': '', 'Additional Charge': ''
-        }]);
+        setPackweightData([...packweightData, emptyRow]);
         break;
+    }
+  };
+
+  // Process the data
+  const processData = () => {
+    try {
+      // Filter out empty rows
+      const cleanAzelisData = azelisData.filter(row => 
+        Object.values(row).some(val => val.trim() !== ''));
+      const cleanSupplierData = supplierData.filter(row => 
+        Object.values(row).some(val => val.trim() !== ''));
+      const cleanLogisticData = logisticData.filter(row => 
+        Object.values(row).some(val => val.trim() !== ''));
+      const cleanPackweightData = packweightData.filter(row => 
+        Object.values(row).some(val => val.trim() !== ''));
+
+      // TODO: Implement your matching logic here
+      // For now, just showing the Azelis data as results
+      setResults(cleanAzelisData);
+      setError('');
+    } catch (err) {
+      setError('Error processing data: ' + err.message);
     }
   };
 
   // Export results to Excel
-  const exportToExcel = () => {
+  const exportResults = () => {
     if (results.length === 0) return;
     
     const ws = XLSX.utils.json_to_sheet(results);
@@ -114,22 +195,28 @@ const MatchApp = () => {
 
   // Reset all data
   const resetAll = () => {
-    setFile(null);
-    setManualMode(false);
-    setActiveTab('azelis');
-    setResults([]);
-    setError('');
-    setAzelisData([{ 'Azelis Code': '', 'Description': '' }]);
-    setSupplierData([{ 
+    setAzelisData(createEmptyRows({ 'Azelis Code': '', 'Description': '' }));
+    setSupplierData(createEmptyRows({
       'Supplier Description': '', 'SKU': '', 'Weight': '',
       'Price': '', 'From': '', 'To': ''
-    }]);
-    setLogisticData([{
+    }));
+    setLogisticData(createEmptyRows({
       'Logistic From': '', 'Logistic To': '', 'Additional Charge': ''
-    }]);
-    setPackweightData([{
+    }));
+    setPackweightData(createEmptyRows({
       'Pack From': '', 'Pack To': '', 'Additional Charge': ''
-    }]);
+    }));
+    setResults([]);
+    setError('');
+  };
+
+  const getCurrentTableData = () => {
+    switch (activeTab) {
+      case 'azelis': return { data: azelisData, setData: setAzelisData };
+      case 'supplier': return { data: supplierData, setData: setSupplierData };
+      case 'logistic': return { data: logisticData, setData: setLogisticData };
+      case 'packweight': return { data: packweightData, setData: setPackweightData };
+    }
   };
 
   return (
@@ -138,32 +225,19 @@ const MatchApp = () => {
         <h1 className="text-2xl font-bold mb-4">Match App</h1>
         
         <div className="flex gap-4 mb-4">
-          <div className="flex-1">
-            <input
-              type="file"
-              accept=".xlsx"
-              onChange={handleFileChange}
-              className="block w-full text-sm text-gray-500 
-                       file:mr-4 file:py-2 file:px-4 
-                       file:rounded-full file:border-0 
-                       file:text-sm file:font-semibold 
-                       file:bg-blue-50 file:text-blue-700 
-                       hover:file:bg-blue-100"
-            />
-          </div>
           <button
-            onClick={() => setManualMode(!manualMode)}
+            onClick={processData}
             className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
           >
-            {manualMode ? 'Switch to File Upload' : 'Enter Data Manually'}
+            Process Data
           </button>
           <button
-            onClick={exportToExcel}
+            onClick={exportResults}
             disabled={results.length === 0}
             className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 
                      disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Export to Excel
+            Export Results
           </button>
           <button
             onClick={resetAll}
@@ -173,65 +247,48 @@ const MatchApp = () => {
           </button>
         </div>
 
-        {loading && (
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-            Processing...
-          </div>
-        )}
-
         {error && (
           <Alert variant="destructive" className="mb-4">
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
 
-        {manualMode && (
-          <div className="mb-4">
-            <div className="border-b border-gray-200">
-              <nav className="-mb-px flex space-x-8">
-                {['azelis', 'supplier', 'logistic', 'packweight'].map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`tab-button border-b-2 px-1 py-4 text-sm font-medium
-                              ${activeTab === tab 
-                                ? 'border-blue-500 text-blue-600' 
-                                : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                              }`}
-                  >
-                    {tab.charAt(0).toUpperCase() + tab.slice(1)} Data
-                  </button>
-                ))}
-              </nav>
-            </div>
-
-            <div className="mt-4">
-              {/* Table components would go here */}
-              {/* For brevity, I'm just showing a placeholder */}
-              <div className="text-center p-4 text-gray-500">
-                Table interface for {activeTab} would go here
-              </div>
-              
-              <button
-                onClick={() => addRow(activeTab)}
-                className="mt-2 px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600"
-              >
-                Add Row
-              </button>
-            </div>
-
-            <button
-              onClick={handleManualProcess}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-            >
-              Process Manual Data
-            </button>
+        <div className="mb-4">
+          <div className="border-b border-gray-200">
+            <nav className="-mb-px flex space-x-8">
+              {Object.keys(tableDefinitions).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`tab-button border-b-2 px-1 py-4 text-sm font-medium
+                            ${activeTab === tab 
+                              ? 'border-blue-500 text-blue-600' 
+                              : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                            }`}
+                >
+                  {tab.charAt(0).toUpperCase() + tab.slice(1)} Data
+                </button>
+              ))}
+            </nav>
           </div>
-        )}
+
+          <div className="mt-4">
+            <div className="mb-2 text-sm text-gray-600">
+              Tip: You can paste data directly from Excel. Select the cell where you want to start pasting.
+            </div>
+            
+            <EditableTable 
+              columns={tableDefinitions[activeTab].columns}
+              {...getCurrentTableData()}
+            />
+            
+
+          </div>
+        </div>
 
         {results.length > 0 && (
           <div className="mt-4 overflow-x-auto">
+            <h2 className="text-xl font-bold mb-2">Results</h2>
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
