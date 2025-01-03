@@ -331,7 +331,7 @@
     const finalRows = [];
 
     // We'll now rely on the user's descThreshold from the UI
-    const scoreThreshold = descThreshold || 80; // fallback if blank
+    const scoreThreshold = descThreshold || 90; // fallback if blank
 
     // For each Azelis desc group
     for (let [azDesc, azRows] of Object.entries(azelisGroups)) {
@@ -577,7 +577,7 @@
     const [results, setResults] = React.useState([]);
 
     // 1) We store a user‐editable threshold for description:
-    const [descThreshold, setDescThreshold] = React.useState(80);
+    const [descThreshold, setDescThreshold] = React.useState(90);
 
     // We have 4 tables
     const createRows = (cols, count=500) => {
@@ -670,7 +670,7 @@
         const cleanPackweight = cleanRows(packweightData, packweightCols);
 
         // parse the threshold from user input
-        const thresholdVal = parseFloat(descThreshold) || 80;
+        const thresholdVal = parseFloat(descThreshold) || 90;
 
         const finalRows = processDataframes(
           cleanAzelis,
@@ -726,7 +726,7 @@
               onChange={(e) => setDescThreshold(e.target.value)}
             />
             <span className="ml-2 text-sm text-gray-600">
-              (Default 80. Raise for stricter matching, lower for more lenient.)
+              (Default 90. Raise for stricter matching, lower for more lenient.)
             </span>
           </div>
 
