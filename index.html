@@ -43,33 +43,33 @@ const EditableTable = ({ columns, data, setData }) => {
   };
 
   return (
-    <div className="border rounded max-h-96 overflow-hidden">
+    <div className="border rounded" style={{ height: '600px' }}>
       <div className="overflow-auto h-full">
-        <table className="w-full border-collapse bg-white">
+        <table className="w-full table-fixed bg-white">
           <thead className="sticky top-0 bg-gray-50 z-10">
             <tr>
               {columns.map((column) => (
                 <th 
                   key={column.key}
-                  className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b"
-                  style={{minWidth: '150px'}}
+                  className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-r"
+                  style={{ width: column.key === 'Description' || column.key === 'Supplier Description' ? '300px' : '150px' }}
                 >
                   {column.label}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
+          <tbody>
             {data.map((row, rowIndex) => (
-              <tr key={rowIndex} className="hover:bg-gray-50">
+              <tr key={rowIndex} className="border-b hover:bg-gray-50">
                 {columns.map((column, colIndex) => (
-                  <td key={column.key} className="px-2 border-r last:border-r-0">
+                  <td key={column.key} className="border-r p-0">
                     <input
                       type="text"
                       value={row[column.key] || ''}
                       onChange={(e) => handleCellChange(rowIndex, column, e.target.value)}
                       onPaste={(e) => handlePaste(e, rowIndex, colIndex)}
-                      className="w-full py-1 px-2 border-0 focus:ring-1 focus:ring-blue-500 rounded"
+                      className="w-full h-8 px-3 border-0 focus:ring-1 focus:ring-blue-500 focus:ring-opacity-50 focus:outline-none"
                     />
                   </td>
                 ))}
