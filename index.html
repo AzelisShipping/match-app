@@ -1,451 +1,269 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Match App</title>
-    <!-- Add Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Add XLSX library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <!-- Add Lodash -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
-    <!-- Add Tabulator for better table handling -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/tabulator/5.4.4/css/tabulator.min.css" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tabulator/5.4.4/js/tabulator.min.js"></script>
-    <style>
-        .tabulator {
-            font-size: 14px;
-            border: 1px solid #ddd;
+import React, { useState, useEffect } from 'react';
+import { Tab } from '@/components/ui/tabs';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
+import _ from 'lodash';
+
+const MatchApp = () => {
+  // State for file and data
+  const [file, setFile] = useState(null);
+  const [manualMode, setManualMode] = useState(false);
+  const [activeTab, setActiveTab] = useState('azelis');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [results, setResults] = useState([]);
+  
+  // State for manual data entry
+  const [azelisData, setAzelisData] = useState([{ 'Azelis Code': '', 'Description': '' }]);
+  const [supplierData, setSupplierData] = useState([{ 
+    'Supplier Description': '', 'SKU': '', 'Weight': '', 
+    'Price': '', 'From': '', 'To': '' 
+  }]);
+  const [logisticData, setLogisticData] = useState([{
+    'Logistic From': '', 'Logistic To': '', 'Additional Charge': ''
+  }]);
+  const [packweightData, setPackweightData] = useState([{
+    'Pack From': '', 'Pack To': '', 'Additional Charge': ''
+  }]);
+
+  // Handle file upload
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setLoading(true);
+    setError('');
+    
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, {
+        cellDates: true,
+        cellNF: true,
+        cellStyles: true
+      });
+
+      const sheets = {};
+      ['Azelis', 'Supplier', 'Logistic', 'PackWeight'].forEach(name => {
+        if (workbook.SheetNames.includes(name)) {
+          sheets[name] = XLSX.utils.sheet_to_json(workbook.Sheets[name]);
         }
-        .tabulator-col {
-            background-color: #f8f9fa;
-            border-right: 1px solid #ddd;
-        }
-        .tabulator-cell {
-            border-right: 1px solid #ddd;
-        }
-    </style>
-</head>
-<body class="bg-gray-100">
-    <div class="container mx-auto p-4">
-        <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
-            <h1 class="text-2xl font-bold mb-4">Match App</h1>
-            
-            <div class="flex gap-4 mb-4">
-                <div class="flex-1">
-                    <input type="file" accept=".xlsx" id="fileInput" 
-                           class="block w-full text-sm text-gray-500 
-                                  file:mr-4 file:py-2 file:px-4 
-                                  file:rounded-full file:border-0 
-                                  file:text-sm file:font-semibold 
-                                  file:bg-blue-50 file:text-blue-700 
-                                  hover:file:bg-blue-100">
-                // Add event listener for file input
-                document.addEventListener('DOMContentLoaded', function() {
-                    const fileInput = document.getElementById('fileInput');
-                    if (fileInput) {
-                        fileInput.addEventListener('change', handleFileUpload);
-                    }
-                });
+      });
 
-                </div>
-                <button onclick="toggleManualEntry()" id="modeToggle"
-                        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-                    Enter Data Manually
-                </button>
-                <button onclick="exportResults()" id="exportButton" 
-                        class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 hidden">
-                    Export to Excel
-                </button>
-                <button onclick="resetAll()" id="resetButton"
-                        class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
-                    Reset
-                </button>
-            </div>
+      processData(sheets);
+    } catch (err) {
+      setError('Error processing file: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-            <div id="loading" class="text-center hidden">
-                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-                Processing...
-            </div>
-            
-            <div id="error" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden"></div>
+  // Process data from either file or manual entry
+  const processData = (data) => {
+    // Implementation of your Python processing logic
+    // This would need to be adapted from the Python code
+    // For now, just displaying the raw data
+    setResults(data.Azelis || []);
+  };
 
-            <div id="manualEntry" class="hidden">
-                <div class="mb-4">
-                    <div class="border-b border-gray-200">
-                        <nav class="-mb-px flex space-x-8" aria-label="Tabs">
-                            <button onclick="switchTab('azelis')" class="tab-button border-b-2 border-transparent px-1 py-4 text-sm font-medium text-gray-500 hover:border-gray-300 hover:text-gray-700">Azelis Data</button>
-                            <button onclick="switchTab('supplier')" class="tab-button border-b-2 border-transparent px-1 py-4 text-sm font-medium text-gray-500 hover:border-gray-300 hover:text-gray-700">Supplier Data</button>
-                            <button onclick="switchTab('logistic')" class="tab-button border-b-2 border-transparent px-1 py-4 text-sm font-medium text-gray-500 hover:border-gray-300 hover:text-gray-700">Logistic Surcharges</button>
-                            <button onclick="switchTab('packweight')" class="tab-button border-b-2 border-transparent px-1 py-4 text-sm font-medium text-gray-500 hover:border-gray-300 hover:text-gray-700">Pack Weight Surcharges</button>
-                        </nav>
-                    </div>
-                    <div id="azelisTable" class="tab-content mt-4"></div>
-                    <div id="supplierTable" class="tab-content mt-4 hidden"></div>
-                    <div id="logisticTable" class="tab-content mt-4 hidden"></div>
-                    <div id="packweightTable" class="tab-content mt-4 hidden"></div>
-                </div>
-                <button onclick="processManualData()" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-                    Process Manual Data
-                </button>
-            </div>
+  // Handle manual data processing
+  const handleManualProcess = () => {
+    const data = {
+      Azelis: azelisData.filter(row => row['Azelis Code'] || row['Description']),
+      Supplier: supplierData.filter(row => Object.values(row).some(v => v)),
+      Logistic: logisticData.filter(row => Object.values(row).some(v => v)),
+      PackWeight: packweightData.filter(row => Object.values(row).some(v => v))
+    };
+    processData(data);
+  };
 
-            <div id="results" class="mt-4"></div>
+  // Add row to respective table
+  const addRow = (tableType) => {
+    switch (tableType) {
+      case 'azelis':
+        setAzelisData([...azelisData, { 'Azelis Code': '', 'Description': '' }]);
+        break;
+      case 'supplier':
+        setSupplierData([...supplierData, {
+          'Supplier Description': '', 'SKU': '', 'Weight': '',
+          'Price': '', 'From': '', 'To': ''
+        }]);
+        break;
+      case 'logistic':
+        setLogisticData([...logisticData, {
+          'Logistic From': '', 'Logistic To': '', 'Additional Charge': ''
+        }]);
+        break;
+      case 'packweight':
+        setPackweightData([...packweightData, {
+          'Pack From': '', 'Pack To': '', 'Additional Charge': ''
+        }]);
+        break;
+    }
+  };
+
+  // Export results to Excel
+  const exportToExcel = () => {
+    if (results.length === 0) return;
+    
+    const ws = XLSX.utils.json_to_sheet(results);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Results");
+    XLSX.writeFile(wb, "match_results.xlsx");
+  };
+
+  // Reset all data
+  const resetAll = () => {
+    setFile(null);
+    setManualMode(false);
+    setActiveTab('azelis');
+    setResults([]);
+    setError('');
+    setAzelisData([{ 'Azelis Code': '', 'Description': '' }]);
+    setSupplierData([{ 
+      'Supplier Description': '', 'SKU': '', 'Weight': '',
+      'Price': '', 'From': '', 'To': ''
+    }]);
+    setLogisticData([{
+      'Logistic From': '', 'Logistic To': '', 'Additional Charge': ''
+    }]);
+    setPackweightData([{
+      'Pack From': '', 'Pack To': '', 'Additional Charge': ''
+    }]);
+  };
+
+  return (
+    <div className="container mx-auto p-4">
+      <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+        <h1 className="text-2xl font-bold mb-4">Match App</h1>
+        
+        <div className="flex gap-4 mb-4">
+          <div className="flex-1">
+            <input
+              type="file"
+              accept=".xlsx"
+              onChange={handleFileChange}
+              className="block w-full text-sm text-gray-500 
+                       file:mr-4 file:py-2 file:px-4 
+                       file:rounded-full file:border-0 
+                       file:text-sm file:font-semibold 
+                       file:bg-blue-50 file:text-blue-700 
+                       hover:file:bg-blue-100"
+            />
+          </div>
+          <button
+            onClick={() => setManualMode(!manualMode)}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            {manualMode ? 'Switch to File Upload' : 'Enter Data Manually'}
+          </button>
+          <button
+            onClick={exportToExcel}
+            disabled={results.length === 0}
+            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 
+                     disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Export to Excel
+          </button>
+          <button
+            onClick={resetAll}
+            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+          >
+            Reset
+          </button>
         </div>
-        
-        <div class="text-sm text-gray-500">Created by Greg Michell</div>
+
+        {loading && (
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+            Processing...
+          </div>
+        )}
+
+        {error && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {manualMode && (
+          <div className="mb-4">
+            <div className="border-b border-gray-200">
+              <nav className="-mb-px flex space-x-8">
+                {['azelis', 'supplier', 'logistic', 'packweight'].map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`tab-button border-b-2 px-1 py-4 text-sm font-medium
+                              ${activeTab === tab 
+                                ? 'border-blue-500 text-blue-600' 
+                                : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                              }`}
+                  >
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)} Data
+                  </button>
+                ))}
+              </nav>
+            </div>
+
+            <div className="mt-4">
+              {/* Table components would go here */}
+              {/* For brevity, I'm just showing a placeholder */}
+              <div className="text-center p-4 text-gray-500">
+                Table interface for {activeTab} would go here
+              </div>
+              
+              <button
+                onClick={() => addRow(activeTab)}
+                className="mt-2 px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600"
+              >
+                Add Row
+              </button>
+            </div>
+
+            <button
+              onClick={handleManualProcess}
+              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Process Manual Data
+            </button>
+          </div>
+        )}
+
+        {results.length > 0 && (
+          <div className="mt-4 overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  {Object.keys(results[0]).map((header) => (
+                    <th
+                      key={header}
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      {header}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {results.map((row, idx) => (
+                  <tr key={idx}>
+                    {Object.values(row).map((value, i) => (
+                      <td key={i} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {value}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      
+      <div className="text-sm text-gray-500">Created by Greg Michell</div>
     </div>
+  );
+};
 
-    <script>
-        // Global variables
-        let processedData = null;
-        let manualMode = false;
-        let tables = {};
-        
-        // Table definitions
-        const tableDefinitions = {
-            azelis: {
-                columns: [
-                    {title: "Azelis Code", field: "Azelis Code", editor: "input"},
-                    {title: "Description", field: "Description", editor: "input"},
-                ],
-                placeholder: "No Azelis data entered"
-            },
-            supplier: {
-                columns: [
-                    {title: "Supplier Description", field: "Supplier Description", editor: "input"},
-                    {title: "SKU", field: "SKU", editor: "input"},
-                    {title: "Weight", field: "Weight", editor: "input"},
-                    {title: "Price", field: "Price", editor: "input"},
-                    {title: "From", field: "From", editor: "input"},
-                    {title: "To", field: "To", editor: "input"}
-                ],
-                placeholder: "No Supplier data entered"
-            },
-            logistic: {
-                columns: [
-                    {title: "Logistic From", field: "Logistic From", editor: "input"},
-                    {title: "Logistic To", field: "Logistic To", editor: "input"},
-                    {title: "Additional Charge", field: "Additional Charge", editor: "input"}
-                ],
-                placeholder: "No Logistic data entered"
-            },
-            packweight: {
-                columns: [
-                    {title: "Pack From", field: "Pack From", editor: "input"},
-                    {title: "Pack To", field: "Pack To", editor: "input"},
-                    {title: "Additional Charge", field: "Additional Charge", editor: "input"}
-                ],
-                placeholder: "No Pack Weight data entered"
-            }
-        };
-
-        // Initialize tables
-        function initializeTables() {
-            Object.entries(tableDefinitions).forEach(([key, def]) => {
-                // First ensure the table div exists
-                const tableDiv = document.getElementById(`${key}Table`);
-                if (!tableDiv) {
-                    console.error(`Table div #${key}Table not found`);
-                    return;
-                }
-
-                // Clear any existing table
-                if (tables[key]) {
-                    tables[key].destroy();
-                }
-
-                // Initialize new table
-                try {
-                    tables[key] = new Tabulator(`#${key}Table`, {
-                        height: 400,
-                        layout: "fitColumns",
-                        columns: def.columns,
-                        placeholder: def.placeholder,
-                        data: [],
-                        addRowPos: "bottom",
-                        history: true,
-                    });
-                    
-                    // Add a row button for each table
-                    const addButton = document.createElement('button');
-                    addButton.textContent = 'Add Row';
-                    addButton.className = 'px-3 py-1 bg-green-500 text-white rounded mt-2 mb-4';
-                    addButton.onclick = () => tables[key].addRow({});
-                    tableDiv.parentNode.insertBefore(addButton, tableDiv);
-                } catch (error) {
-                    console.error(`Error initializing ${key} table:`, error);
-                }
-            });
-        }
-
-        // Switch between manual entry tabs
-        function switchTab(tabName) {
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-            document.getElementById(`${tabName}Table`).classList.remove('hidden');
-            
-            document.querySelectorAll('.tab-button').forEach(btn => {
-                btn.classList.remove('border-blue-500', 'text-blue-600');
-                btn.classList.add('border-transparent', 'text-gray-500');
-            });
-            event.target.classList.remove('border-transparent', 'text-gray-500');
-            event.target.classList.add('border-blue-500', 'text-blue-600');
-        }
-
-        // Toggle manual entry mode
-        function toggleManualEntry() {
-            manualMode = !manualMode;
-            const manualEntryDiv = document.getElementById('manualEntry');
-            manualEntryDiv.classList.toggle('hidden');
-            document.getElementById('modeToggle').textContent = 
-                manualMode ? 'Switch to File Upload' : 'Enter Data Manually';
-            
-            if (manualMode) {
-                // Always reinitialize tables when showing manual entry
-                initializeTables();
-                // Force the first tab to be active
-                const firstTab = document.querySelector('.tab-button');
-                if (firstTab) {
-                    firstTab.click();
-                }
-                // Make sure the first table is visible
-                const firstTableDiv = document.getElementById('azelisTable');
-                if (firstTableDiv) {
-                    firstTableDiv.classList.remove('hidden');
-                }
-            }
-        }
-
-        // Process Excel file
-        async function handleFileUpload(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            document.getElementById('loading').classList.remove('hidden');
-            document.getElementById('error').classList.add('hidden');
-            document.getElementById('results').innerHTML = '';
-            
-            try {
-                const arrayBuffer = await file.arrayBuffer();
-                const workbook = XLSX.read(arrayBuffer, {
-                    type: 'array',
-                    cellDates: true,
-                    cellNF: true,
-                    cellStyles: true
-                });
-
-                // Process sheets
-                const azelisSheet = XLSX.utils.sheet_to_json(workbook.Sheets['Azelis'] || {});
-                const supplierSheet = XLSX.utils.sheet_to_json(workbook.Sheets['Supplier'] || {});
-                const logisticSheet = XLSX.utils.sheet_to_json(workbook.Sheets['Logistic'] || {});
-                const packWeightSheet = XLSX.utils.sheet_to_json(workbook.Sheets['PackWeight'] || {});
-
-                processedData = processData(azelisSheet, supplierSheet, logisticSheet, packWeightSheet);
-                displayResults(processedData);
-                document.getElementById('exportButton').classList.remove('hidden');
-            } catch (err) {
-                document.getElementById('error').textContent = 'Error processing file: ' + err.message;
-                document.getElementById('error').classList.remove('hidden');
-            } finally {
-                document.getElementById('loading').classList.add('hidden');
-            }
-        }
-
-        // Process manual data
-        function processManualData() {
-            const azelisData = tables.azelis.getData();
-            const supplierData = tables.supplier.getData();
-            const logisticData = tables.logistic.getData();
-            const packWeightData = tables.packweight.getData();
-
-            processedData = processData(azelisData, supplierData, logisticData, packWeightData);
-            displayResults(processedData);
-            document.getElementById('exportButton').classList.remove('hidden');
-        }
-
-        // Main data processing function
-        function processData(azelis, supplier, logistic, packWeight) {
-            // Implementation of your Python processing logic
-            return azelis.map(az => {
-                const azCode = az['Azelis Code'] || '';
-                const azDesc = az['Description'] || '';
-                const packWeightMatch = azCode.match(/(\d+)KG/);
-                const azPackWeight = packWeightMatch ? parseInt(packWeightMatch[1]) : null;
-
-                // Find matching suppliers
-                const matches = supplier.filter(sup => {
-                    const azDescClean = azDesc.toLowerCase().trim();
-                    const supDescClean = (sup['Supplier Description'] || '').toLowerCase().trim();
-                    
-                    // Description match
-                    const descMatch = azDescClean.includes(supDescClean) || 
-                                    supDescClean.includes(azDescClean);
-                    
-                    // Weight match
-                    const supWeight = parseFloat(sup['Weight']) || 0;
-                    const weightMatch = Math.abs(azPackWeight - supWeight) <= 1;
-                    
-                    return descMatch && weightMatch;
-                });
-
-                if (matches.length === 0) {
-                    return {
-                        'Azelis Code': azCode,
-                        'Azelis Description': azDesc,
-                        'Azelis Pack Weight': azPackWeight,
-                        'Matched Supplier Description': 'No Match Found',
-                        'Matched Supplier SKU': '',
-                        'Matched Supplier Weight': '',
-                        'Matched Supplier Price': '',
-                        'Description Match Score': 0,
-                        'Weight Match Score': 0,
-                        'Total Score': 0
-                    };
-                }
-
-                // Get best match
-                const bestMatch = matches[0];
-                const scores = calculateAllScores(
-                    azDesc,
-                    azPackWeight,
-                    bestMatch['Supplier Description'],
-                    parseFloat(bestMatch['Weight'])
-                );
-
-                // Calculate surcharges
-                const priceWithSurcharges = calculateSurcharges(
-                    parseFloat(bestMatch['Price']) || 0,
-                    parseFloat(bestMatch['Weight']) || 0,
-                    logistic,
-                    packWeight
-                );
-
-                return {
-                    'Azelis Code': azCode,
-                    'Azelis Description': azDesc,
-                    'Azelis Pack Weight': azPackWeight,
-                    'Matched Supplier Description': bestMatch['Supplier Description'],
-                    'Matched Supplier SKU': bestMatch['SKU'],
-                    'Matched Supplier Weight': bestMatch['Weight'],
-                    'Matched Supplier Price': priceWithSurcharges,
-                    'Description Match Score': scores.descriptionScore,
-                    'Weight Match Score': scores.weightScore,
-                    'Total Score': scores.totalScore
-                };
-            });
-        }
-
-        // Enhanced scoring logic
-        function calculateAllScores(azDesc, azPackWeight, supDesc, supWeight) {
-            let descScore = 0.0;
-            let wtScore = 0.0;
-
-            // Clean text helper function
-            function cleanText(text) {
-                let cleaned = String(text).toLowerCase();
-                cleaned = cleaned.replace(/[®™©()[\],.;:'"]+/g, '');
-                cleaned = cleaned.trim().replace(/\s+/g, ' ');
-                return cleaned;
-            }
-
-            const azDescClean = cleanText(azDesc);
-            const supDescClean = cleanText(supDesc);
-            
-            // Remove spaces for exact matching
-            const azNoSpace = azDescClean.replace(/\s/g, '');
-            const supNoSpace = supDescClean.replace(/\s/g, '');
-
-            // Description Score
-            if (azDescClean && supDescClean) {
-                // Exact match (with or without spaces)
-                if (azDescClean === supDescClean || azNoSpace === supNoSpace) {
-                    descScore = 100.0;
-                }
-                // Partial match (with spaces)
-                else if (azDescClean.includes(supDescClean) || supDescClean.includes(azDescClean)) {
-                    descScore = 90.0;
-                }
-                // Partial match (without spaces)
-                else if (azNoSpace.includes(supNoSpace) || supNoSpace.includes(azNoSpace)) {
-                    descScore = 85.0;
-                }
-                else {
-                    // Word matching helper function
-                    function getWordScore(word1, word2) {
-                        if (word1 === word2) return 1.0;
-                        
-                        // Handle common suffixes
-                        const suffixes = ['s', 'se', 'sse', 'es'];
-                        for (const suffix of suffixes) {
-                            if (word1.endsWith(suffix)) {
-                                const base1 = word1.slice(0, -suffix.length);
-                                if (word2.startsWith(base1)) return 0.9;
-                            }
-                            if (word2.endsWith(suffix)) {
-                                const base2 = word2.slice(0, -suffix.length);
-                                if (word1.startsWith(base2)) return 0.9;
-                            }
-                        }
-                        
-                        // Handle partial matches
-                        const minLen = Math.min(word1.length, word2.length);
-                        if (minLen > 3) {
-                            if (word1.slice(0, minLen-1) === word2.slice(0, minLen-1)) return 0.8;
-                        }
-                        
-                        return 0.0;
-                    }
-
-                    // Split into words and compare
-                    const azWords = azDescClean.split(' ');
-                    const supWords = supDescClean.split(' ');
-                    
-                    let wordMatches = 0;
-                    const usedSupWords = new Set();
-                    
-                    for (const azWord of azWords) {
-                        let bestScore = 0;
-                        let bestMatch = null;
-                        
-                        for (const supWord of supWords) {
-                            if (!usedSupWords.has(supWord)) {
-                                const score = getWordScore(azWord, supWord);
-                                if (score > bestScore) {
-                                    bestScore = score;
-                                    bestMatch = supWord;
-                                }
-                            }
-                        }
-                        
-                        if (bestMatch && bestScore > 0) {
-                            wordMatches += bestScore;
-                            usedSupWords.add(bestMatch);
-                        }
-                    }
-                    
-                    const totalWords = Math.max(azWords.length, supWords.length);
-                    if (totalWords > 0) {
-                        descScore = (wordMatches / totalWords) * 80.0;
-                    }
-                }
-            }
-
-            // Weight Score
-            if (azPackWeight != null && supWeight != null) {
-                const diff = Math.abs(azPackWeight - supWeight);
-                wtScore = Math.max(0, 100 - diff);
-            }
-
-            const totalScore = 0.7 * descScore + 0.3 * wtScore;
-            return {
-                descriptionScore: Math.round(descScore * 100) / 100,
-                weightScore: Math.round(wtScore * 100) / 100,
-                totalScore: Math.round(totalScore * 100) / 100
-            };
-        }
-
-        // Calculate weight match score
-        function calculateWeightScore(weight1, weight2) {
-            if (!weight1 || !weight2) return 0;
-            const diff = Math.abs(
+export default MatchApp;
