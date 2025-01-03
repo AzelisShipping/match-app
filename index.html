@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Match App</title>
+    <!-- Add Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Add XLSX library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Add Lodash -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto p-4">
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+            <h1 class="text-2xl font-bold mb-4">Match App</h1>
+            
+            <div class="flex gap-4 mb-4">
+                <input type="file" accept=".xlsx" id="fileInput" 
+                       class="block w-full text-sm text-gray-500 
+                              file:mr-4 file:py-2 file:px-4 
+                              file:rounded-full file:border-0 
+                              file:text-sm file:font-semibold 
+                              file:bg-blue-50 file:text-blue-700 
+                              hover:file:bg-blue-100">
+                <button onclick="toggleManualEntry()" id="modeToggle"
+                        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+                    Enter Data Manually
+                </button>
+                <button onclick="exportResults()" id="exportButton" 
+                        class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 hidden">
+                    Export to Excel
+                </button>
+            </div>
+
+            <div id="loading" class="text-center hidden">Processing...</div>
+            <div id="error" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden"></div>
+
+            <div id="manualEntry" class="hidden">
+                <!-- Manual entry tabs will be inserted here by JavaScript -->
+            </div>
+
+            <div id="results" class="overflow-x-auto"></div>
+        </div>
+        
+        <div class="text-sm text-gray-500">Created by Greg Michell</div>
+    </div>
+
+    <script>
+        let processedData = null;
+        let manualMode = false;
+
+        // File handling
+        document.getElementById('fileInput').addEventListener('change', handleFileUpload);
+
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('error').classList.add('hidden');
+            document.getElementById('results').innerHTML = '';
+            
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const workbook = XLSX.read(arrayBuffer, {
+                    type: 'array',
+                    cellDates: true,
+                    cellNF: true,
+                    cellStyles: true
+                });
+
+                // Process each sheet
+                const azelisSheet = XLSX.utils.sheet_to_json(workbook.Sheets['Azelis'] || {});
+                const supplierSheet = XLSX.utils.sheet_to_json(workbook.Sheets['Supplier'] || {});
+                const logisticSheet = XLSX.utils.sheet_to_json(workbook.Sheets['Logistic'] || {});
+                const packWeightSheet = XLSX.utils.sheet_to_json(workbook.Sheets['PackWeight'] || {});
+
+                processedData = processData(azelisSheet, supplierSheet, logisticSheet, packWeightSheet);
+                displayResults(processedData);
+                document.getElementById('exportButton').classList.remove('hidden');
+            } catch (err) {
+                document.getElementById('error').textContent = 'Error processing file: ' + err.message;
+                document.getElementById('error').classList.remove('hidden');
+            } finally {
+                document.getElementById('loading').classList.add('hidden');
+            }
+        }
+
+        function processData(azelis, supplier, logistic, packWeight) {
+            // Implementation of your data processing logic here
+            // Port of your Python processing functions
+            return azelis.map(az => {
+                // Find matching supplier entries
+                const matches = supplier.filter(sup => {
+                    const descMatch = matchDescriptions(az.Description, sup['Supplier Description']);
+                    const weightMatch = matchWeights(az['Pack Weight'], sup.Weight);
+                    return descMatch && weightMatch;
+                });
+
+                if (matches.length === 0) {
+                    return {
+                        'Azelis Code': az['Azelis Code'],
+                        'Description': az.Description,
+                        'Pack Weight': az['Pack Weight'],
+                        'Match Score': 0,
+                        'Matched Supplier': 'No match found'
+                    };
+                }
+
+                // Get best match
+                const bestMatch = matches[0];
+                return {
+                    'Azelis Code': az['Azelis Code'],
+                    'Description': az.Description,
+                    'Pack Weight': az['Pack Weight'],
+                    'Match Score': calculateScore(az, bestMatch),
+                    'Matched Supplier': bestMatch['Supplier Description']
+                };
+            });
+        }
+
+        function matchDescriptions(desc1, desc2) {
+            if (!desc1 || !desc2) return false;
+            return desc1.toLowerCase().includes(desc2.toLowerCase()) || 
+                   desc2.toLowerCase().includes(desc1.toLowerCase());
+        }
+
+        function matchWeights(w1, w2) {
+            if (!w1 || !w2) return false;
+            return Math.abs(parseFloat(w1) - parseFloat(w2)) <= 1;
+        }
+
+        function calculateScore(azelis, supplier) {
+            // Simplified scoring logic
+            let score = 0;
+            if (matchDescriptions(azelis.Description, supplier['Supplier Description'])) {
+                score += 50;
+            }
+            if (matchWeights(azelis['Pack Weight'], supplier.Weight)) {
+                score += 50;
+            }
+            return score;
+        }
+
+        function displayResults(data) {
+            if (!data || data.length === 0) return;
+
+            const columns = Object.keys(data[0]);
+            const table = document.createElement('table');
+            table.className = 'w-full border-collapse';
+
+            // Create header
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            columns.forEach(col => {
+                const th = document.createElement('th');
+                th.textContent = col;
+                th.className = 'p-2 border bg-gray-100';
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            // Create body
+            const tbody = document.createElement('tbody');
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+                columns.forEach(col => {
+                    const td = document.createElement('td');
+                    td.textContent = row[col];
+                    td.className = 'p-2 border';
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '';
+            resultsDiv.appendChild(table);
+        }
+
+        function exportResults() {
+            if (!processedData) return;
+            
+            const ws = XLSX.utils.json_to_sheet(processedData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Results');
+            XLSX.writeFile(wb, 'match_results.xlsx');
+        }
+
+        function toggleManualEntry() {
+            manualMode = !manualMode;
+            document.getElementById('manualEntry').classList.toggle('hidden');
+            document.getElementById('modeToggle').textContent = 
+                manualMode ? 'Switch to File Upload' : 'Enter Data Manually';
+        }
+    </script>
+</body>
+</html>
