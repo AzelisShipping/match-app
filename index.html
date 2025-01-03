@@ -2,589 +2,778 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Match App</title>
+  <title>Match App (Python Logic Replicated)</title>
   <!-- Tailwind CSS from CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- React, ReactDOM, and Babel from CDN -->
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <!-- XLSX from CDN -->
+  <!-- XLSX from CDN (optional if you want to export results) -->
   <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
   
-  <!-- Some basic styling to ensure the body stretches and is readable -->
   <style>
     body {
       margin: 0;
       padding: 0;
       min-height: 100vh;
       font-family: sans-serif;
-      background-color: #f9fafb; /* Light Tailwind grey */
+      background-color: #f9fafb; /* Tailwind gray-50 */
     }
   </style>
 </head>
 <body>
-  
-  <!-- Root div for our React app -->
   <div id="root"></div>
-  
-  <!-- React code with Babel in the browser -->
+
   <script type="text/babel">
-    // -------------------------------------------
-    // 1) SCORING LOGIC (JavaScript version)
-    // -------------------------------------------
-    function calculateAllScores(azDesc, azPackWeight, supDesc, supWeight) {
-      let descScore = 0;
-      let wtScore = 0;
 
-      // Helper to clean text
-      function cleanText(text) {
-        const str = String(text).toLowerCase();
-        // remove special chars ®™©()[],.;:'"
-        const noSpecial = str.replace(/[®™©()\[\],.;:'"]+/g, '');
-        // normalize spacing
-        return noSpecial.trim().replace(/\s+/g, ' ');
+  /***************************************************************************
+   * 1) Utility Functions (JavaScript versions of your Python helpers)
+   ***************************************************************************/
+
+  // Safely parse a string or number to float. Returns null if invalid.
+  function floatify(val) {
+    const num = parseFloat(val);
+    return isNaN(num) ? null : num;
+  }
+
+  // Example: If "Azelis Code" includes "123KG", we parse out "123"
+  function splitData(s) {
+    const str = String(s);
+    // Look for any digits that come before "KG"
+    const match = str.match(/(\d+)(?=KG)/i);
+    if (match) {
+      return parseFloat(match[1]);
+    }
+    return null;
+  }
+
+  // The simpler description scoring used in your Python snippet
+  function calculateAllScores(azDesc, azPackWeight, supDesc, supWeight) {
+    let descScore = 0;
+    let wtScore = 0;
+
+    // Clean descriptions
+    const azDescClean = azDesc
+      ? azDesc.toLowerCase().trim().replace(/\s+/g, ' ')
+      : '';
+    const supDescClean = supDesc
+      ? supDesc.toLowerCase().trim().replace(/\s+/g, ' ')
+      : '';
+    // Remove spaces for exact matching
+    const azNoSpace = azDescClean.replace(/\s+/g, '');
+    const supNoSpace = supDescClean.replace(/\s+/g, '');
+
+    // Description Score
+    if (azDescClean && supDescClean) {
+      // Exact match
+      if (azDescClean === supDescClean || azNoSpace === supNoSpace) {
+        descScore = 100;
       }
-
-      const azDescClean = cleanText(azDesc);
-      const supDescClean = cleanText(supDesc);
-
-      // For exact matching (no spaces)
-      const azNoSpace = azDescClean.replace(/\s+/g, '');
-      const supNoSpace = supDescClean.replace(/\s+/g, '');
-
-      // ---- DESCRIPTION SCORE ----
-      if (azDescClean && supDescClean) {
-        // Exact match
-        if (azDescClean === supDescClean || azNoSpace === supNoSpace) {
-          descScore = 100.0;
-        }
-        // Partial match (with spaces)
-        else if (
-          azDescClean.includes(supDescClean) ||
-          supDescClean.includes(azDescClean)
-        ) {
-          descScore = 90.0;
-        }
-        // Partial match (no spaces)
-        else if (
-          azNoSpace.includes(supNoSpace) ||
-          supNoSpace.includes(azNoSpace)
-        ) {
-          descScore = 85.0;
-        } else {
-          // Word-based logic
-          function getWordScore(word1, word2) {
-            if (word1 === word2) {
-              return 1.0;
-            }
-            // handle suffixes
-            const suffixes = ['s', 'se', 'sse', 'es'];
-            for (let suffix of suffixes) {
-              if (word1.endsWith(suffix)) {
-                const base1 = word1.slice(0, -suffix.length);
-                if (word2.startsWith(base1)) {
-                  return 0.9;
-                }
-              }
-              if (word2.endsWith(suffix)) {
-                const base2 = word2.slice(0, -suffix.length);
-                if (word1.startsWith(base2)) {
-                  return 0.9;
-                }
-              }
-            }
-            // partial match for words > 3 chars
-            const minLen = Math.min(word1.length, word2.length);
-            if (minLen > 3) {
-              if (
-                word1.slice(0, minLen - 1) ===
-                word2.slice(0, minLen - 1)
-              ) {
-                return 0.8;
-              }
-            }
-            return 0.0;
-          }
-
-          const azWords = azDescClean.split(' ');
-          const supWords = supDescClean.split(' ');
-          let wordMatches = 0;
-          const usedSupWords = new Set();
-
-          for (let azWord of azWords) {
-            let bestScore = 0;
-            let bestMatch = null;
-            for (let supWord of supWords) {
-              if (!usedSupWords.has(supWord)) {
-                const score = getWordScore(azWord, supWord);
-                if (score > bestScore) {
-                  bestScore = score;
-                  bestMatch = supWord;
-                }
-              }
-            }
-            if (bestMatch && bestScore > 0) {
-              wordMatches += bestScore;
-              usedSupWords.add(bestMatch);
-            }
-          }
-
-          const totalWords = Math.max(azWords.length, supWords.length);
-          if (totalWords > 0) {
-            descScore = (wordMatches / totalWords) * 80.0;
-          }
-        }
+      // Partial match (with spaces)
+      else if (
+        azDescClean.includes(supDescClean) ||
+        supDescClean.includes(azDescClean)
+      ) {
+        descScore = 90;
       }
-
-      // ---- WEIGHT SCORE ----
-      const azNum = parseFloat(azPackWeight);
-      const supNum = parseFloat(supWeight);
-
-      if (!isNaN(azNum) && !isNaN(supNum)) {
-        const diff = Math.abs(azNum - supNum);
-        wtScore = Math.max(0, 100 - diff);
+      // Partial match (without spaces)
+      else if (
+        azNoSpace.includes(supNoSpace) ||
+        supNoSpace.includes(azNoSpace)
+      ) {
+        descScore = 85;
+      } else {
+        // Word-based fallback
+        const azWords = new Set(azDescClean.split(' '));
+        const supWords = new Set(supDescClean.split(' '));
+        const common = [...azWords].filter(x => supWords.has(x));
+        const totalWords = Math.max(azWords.size, supWords.size);
+        descScore = (common.length / totalWords) * 80.0;
       }
-
-      // ---- TOTAL SCORE ----
-      const totalScore = (0.7 * descScore) + (0.3 * wtScore);
-
-      return {
-        descScore: parseFloat(descScore.toFixed(2)),
-        wtScore: parseFloat(wtScore.toFixed(2)),
-        totalScore: parseFloat(totalScore.toFixed(2))
-      };
     }
 
-    // -------------------------------------------
-    // 2) ALERT COMPONENT (simple placeholder)
-    // -------------------------------------------
-    const Alert = ({ children }) => {
-      return (
-        <div
-          className="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative"
-          role="alert"
-        >
-          {children}
-        </div>
-      );
-    };
+    // Weight Score
+    const azNum = floatify(azPackWeight);
+    const supNum = floatify(supWeight);
+    if (azNum !== null && supNum !== null) {
+      const diff = Math.abs(azNum - supNum);
+      wtScore = Math.max(0, 100 - diff);
+    }
 
-    // -------------------------------------------
-    // 3) EDITABLE TABLE COMPONENT
-    // -------------------------------------------
-    const EditableTable = ({ columns, data, setData }) => {
-      const handlePaste = (e, rowIndex, colIndex) => {
-        e.preventDefault();
-        const pastedText = e.clipboardData.getData('text');
-        const rows = pastedText.split(/\r\n|\n|\r/).filter(row => row.trim());
-        
-        // Split each row by tabs or multiple spaces
-        const pastedData = rows.map(row => row.split(/\t|\s{2,}/));
-        
-        // Update data with pasted content
-        setData(currentData => {
-          const newData = [...currentData];
-          pastedData.forEach((row, i) => {
-            const dataRowIndex = rowIndex + i;
-            // Create new rows if needed
-            while (newData.length <= dataRowIndex) {
-              const emptyRow = {};
-              columns.forEach(col => (emptyRow[col.key] = ''));
-              newData.push(emptyRow);
-            }
-            
-            row.forEach((cell, j) => {
-              const colKey = columns[colIndex + j]?.key;
-              if (colKey) {
-                newData[dataRowIndex][colKey] = cell.trim();
-              }
-            });
+    // Weighted total
+    const totalScore = 0.7 * descScore + 0.3 * wtScore;
+    return [
+      parseFloat(descScore.toFixed(2)),
+      parseFloat(wtScore.toFixed(2)),
+      parseFloat(totalScore.toFixed(2))
+    ];
+  }
+
+  // Surcharge 1: Pack Weight
+  function applyPackWeightSurcharges(lineObj, packweightRows) {
+    // If no packweight data, just return
+    if (!packweightRows || packweightRows.length === 0) {
+      return lineObj;
+    }
+
+    const supWeight = floatify(lineObj['Matched Supplier Weight']);
+    let basePrice = floatify(lineObj['Matched Supplier Price']) || 0;
+    let totalPwSurcharge = 0;
+
+    // For each pack weight surcharge rule
+    for (let row of packweightRows) {
+      const pwFrom = floatify(row['Pack From']);
+      const pwTo = floatify(row['Pack To']);
+      const addVal = floatify(row['Additional Charge']) || 0;
+
+      // Convert missing from/to to -∞ or +∞
+      const fromVal = pwFrom === null ? -Infinity : pwFrom;
+      const toVal = pwTo === null ? Infinity : pwTo;
+
+      if (supWeight !== null && supWeight >= fromVal && supWeight <= toVal) {
+        totalPwSurcharge += addVal;
+      }
+    }
+
+    lineObj['Pack Weight Surcharge'] = parseFloat(totalPwSurcharge.toFixed(2));
+    lineObj['Matched Supplier Price'] = parseFloat(
+      (basePrice + totalPwSurcharge).toFixed(2)
+    );
+    return lineObj;
+  }
+
+  // Surcharge 2: Logistic
+  // If we find a row in logistic data that EXACTLY matches sup_from/sup_to, add to price
+  // Otherwise we produce an "extra line" with (Extra Logistic) columns
+  function applyLogisticSurcharges(lineObj, logisticRows) {
+    if (!logisticRows || logisticRows.length === 0) {
+      return [lineObj];
+    }
+
+    // We'll build an array of final lines to return
+    const lines = [];
+    let mainLine = { ...lineObj }; // copy
+    let basePrice = floatify(mainLine['Matched Supplier Price']) || 0;
+    let logisticSum = floatify(mainLine['Logistic Surcharge']) || 0;
+    if (!logisticSum) logisticSum = 0;
+
+    const supFrom = floatify(mainLine['Matched Supplier From']);
+    const supTo = floatify(mainLine['Matched Supplier To']);
+
+    // We'll track "extra lines" for logistic surcharges that don't match exactly
+    const extraLines = [];
+
+    for (let row of logisticRows) {
+      let lFrom = floatify(row['Logistic From']);
+      let lTo = floatify(row['Logistic To']);
+      let addVal = floatify(row['Additional Charge']) || 0;
+
+      // null => Infinity
+      if (lFrom === null) lFrom = -Infinity;
+      if (lTo === null) lTo = Infinity;
+
+      // If logistic from/to EXACTLY matches sup_from/sup_to, add it
+      if (lFrom === supFrom && lTo === supTo) {
+        basePrice += addVal;
+        logisticSum += addVal;
+      } else {
+        // Create new line
+        const newLine = { ...mainLine };
+        let newPrice = floatify(newLine['Matched Supplier Price']) || 0;
+        newPrice += addVal;
+        newLine['Matched Supplier From'] = `(Extra Logistic) ${lFrom}`;
+        newLine['Matched Supplier To'] = `(Extra Logistic) ${lTo}`;
+        newLine['Matched Supplier Price'] = parseFloat(newPrice.toFixed(2));
+        newLine['Logistic Surcharge'] = parseFloat(addVal.toFixed(2));
+        // Blank out the scores in the extra line
+        newLine['Description Match Score'] = '';
+        newLine['Weight Match Score'] = '';
+        newLine['Total Score'] = '';
+        extraLines.push(newLine);
+      }
+    }
+
+    // Update main line
+    mainLine['Matched Supplier Price'] = parseFloat(basePrice.toFixed(2));
+    mainLine['Logistic Surcharge'] = parseFloat(logisticSum.toFixed(2));
+    lines.push(mainLine);
+    // Add extras
+    lines.push(...extraLines);
+
+    return lines;
+  }
+
+  /***************************************************************************
+   * 2) Core “Process DataFrames” Logic (JavaScript version)
+   ***************************************************************************/
+
+  /**
+   * Convert each table’s data into an array of objects (like DataFrame rows).
+   * Then replicate the logic from `process_dataframes`.
+   */
+  function processDataframes(azelisRows, supplierRows, logisticRows, packweightRows) {
+    // 1) Clean and parse Azelis data
+    //    - parse out pack weight from Azelis Code
+    //    - rename fields for clarity
+    for (let row of azelisRows) {
+      // Extract “Pack Weight” from code if 123KG pattern
+      const codeVal = row['Azelis Code'] || '';
+      const derivedWt = splitData(codeVal);
+      row['Azelis Pack Weight'] = derivedWt; // store it
+      // If user typed something in the row for "Azelis Pack Weight", we can keep it or override
+      // The Python code specifically sets 'Pack Weight' from 'Azelis Code'
+      // We'll treat the derived one as official
+      row['Azelis Description'] = (row['Description'] || '').trim();
+    }
+
+    // 2) Clean and parse Supplier data
+    //    - Convert Weight to numeric
+    for (let row of supplierRows) {
+      row['Supplier Description'] = (row['Supplier Description'] || '').trim();
+      row['Weight'] = floatify(row['Weight']);
+    }
+
+    // 3) Clean logistic data
+    //    - Convert from/to/additional charge => numeric
+    //    - Remove empty lines
+    const cleanLogistic = logisticRows.filter(r =>
+      (r['Logistic From'] !== '' && r['Logistic To'] !== '') ||
+      r['Additional Charge'] !== ''
+    ).map(r => ({
+      'Logistic From': floatify(r['Logistic From']),
+      'Logistic To': floatify(r['Logistic To']),
+      'Additional Charge': floatify(r['Additional Charge']) || 0
+    }));
+
+    // 4) Clean pack weight data
+    //    - Convert from/to/additional => numeric
+    const cleanPackWeight = packweightRows.filter(r =>
+      (r['Pack From'] !== '' && r['Pack To'] !== '') ||
+      r['Additional Charge'] !== ''
+    ).map(r => ({
+      'Pack From': floatify(r['Pack From']),
+      'Pack To': floatify(r['Pack To']),
+      'Additional Charge': floatify(r['Additional Charge']) || 0
+    }));
+
+    // Now replicate the grouping & matching logic
+
+    // Group Azelis by desc
+    const azelisGroups = {};
+    for (let row of azelisRows) {
+      const desc = (row['Azelis Description'] || '').toLowerCase();
+      if (!azelisGroups[desc]) {
+        azelisGroups[desc] = [];
+      }
+      azelisGroups[desc].push(row);
+    }
+
+    // Group Supplier by desc
+    const supplierGroups = {};
+    for (let row of supplierRows) {
+      const desc = (row['Supplier Description'] || '').toLowerCase();
+      if (!supplierGroups[desc]) {
+        supplierGroups[desc] = [];
+      }
+      supplierGroups[desc].push(row);
+    }
+
+    const finalRows = [];
+    const scoreThreshold = 30.0;  // same as your Python
+
+    // For each Azelis desc group
+    for (let [azDesc, azRows] of Object.entries(azelisGroups)) {
+      // Find all matching supplier descriptions above threshold
+      let bestMatches = [];
+      let bestScore = -1;
+
+      // Compare azDesc vs. each supplier desc
+      for (let [supDesc, supRows] of Object.entries(supplierGroups)) {
+        // Only scoring desc, ignoring weights here
+        const [dScore] = calculateAllScores(azDesc, null, supDesc, null); 
+        if (dScore >= scoreThreshold) {
+          bestMatches = bestMatches.concat(supRows);
+          if (dScore > bestScore) {
+            bestScore = dScore;
+          }
+        }
+      }
+
+      if (bestMatches.length === 0) {
+        // No matching supplier group => push "No Match Found" for each Azelis row
+        for (let azRow of azRows) {
+          finalRows.push({
+            'Azelis Code': azRow['Azelis Code'] || '',
+            'Azelis Description': azRow['Azelis Description'] || '',
+            'Azelis Pack Weight': floatify(azRow['Azelis Pack Weight']) || '',
+            'Matched Supplier Description': 'No Match Found',
+            'Matched Supplier SKU': '',
+            'Matched Supplier Weight': '',
+            'Matched Supplier Price': '',
+            'Matched Supplier From': '',
+            'Matched Supplier To': '',
+            'Pack Weight Surcharge': '',
+            'Logistic Surcharge': '',
+            'Description Match Score': '',
+            'Weight Match Score': '',
+            'Total Score': ''
           });
-          return newData;
-        });
-      };
-
-      const handleCellChange = (rowIndex, column, value) => {
-        setData(currentData => {
-          const newData = [...currentData];
-          newData[rowIndex] = { ...newData[rowIndex], [column.key]: value };
-          return newData;
-        });
-      };
-
-      return (
-        <div className="border rounded" style={{ height: '600px' }}>
-          <div className="overflow-auto h-full">
-            <table className="w-full table-fixed bg-white">
-              <thead className="sticky top-0 bg-gray-50 z-10">
-                <tr>
-                  {columns.map((column) => (
-                    <th 
-                      key={column.key}
-                      className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-r"
-                      style={{
-                        width:
-                          column.key === 'Description' ||
-                          column.key === 'Supplier Description'
-                            ? '300px'
-                            : '150px',
-                      }}
-                    >
-                      {column.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {data.map((row, rowIndex) => (
-                  <tr key={rowIndex} className="border-b hover:bg-gray-50">
-                    {columns.map((column, colIndex) => (
-                      <td key={column.key} className="border-r p-0">
-                        <input
-                          type="text"
-                          value={row[column.key] || ''}
-                          onChange={(e) => handleCellChange(rowIndex, column, e.target.value)}
-                          onPaste={(e) => handlePaste(e, rowIndex, colIndex)}
-                          className="w-full h-8 px-3 border-0 focus:ring-1 focus:ring-blue-500 focus:ring-opacity-50 focus:outline-none"
-                        />
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      );
-    };
-
-    // -------------------------------------------
-    // 4) MAIN APP COMPONENT
-    // -------------------------------------------
-    const MatchApp = () => {
-      // Tab state
-      const [activeTab, setActiveTab] = React.useState('azelis');
-      // Error and results
-      const [error, setError] = React.useState('');
-      const [results, setResults] = React.useState([]);
-
-      // Create array of 1000 empty rows for each table
-      const createEmptyRows = (template, count = 1000) =>
-        Array(count)
-          .fill()
-          .map(() => ({ ...template }));
-
-      // Table data states
-      const [azelisData, setAzelisData] = React.useState(
-        createEmptyRows({ 'Azelis Code': '', 'Description': '', 'PackWeight': '' })
-      );
-      const [supplierData, setSupplierData] = React.useState(
-        createEmptyRows({
-          'Supplier Description': '',
-          'SKU': '',
-          'Weight': '',
-          'Price': '',
-          'From': '',
-          'To': ''
-        })
-      );
-      const [logisticData, setLogisticData] = React.useState(
-        createEmptyRows({
-          'Logistic From': '',
-          'Logistic To': '',
-          'Additional Charge': ''
-        })
-      );
-      const [packweightData, setPackweightData] = React.useState(
-        createEmptyRows({
-          'Pack From': '',
-          'Pack To': '',
-          'Additional Charge': ''
-        })
-      );
-
-      // Table column definitions
-      const tableDefinitions = {
-        azelis: {
-          columns: [
-            { key: 'Azelis Code', label: 'Azelis Code' },
-            { key: 'Description', label: 'Description' },
-            { key: 'PackWeight', label: 'PackWeight' }
-          ]
-        },
-        supplier: {
-          columns: [
-            { key: 'Supplier Description', label: 'Supplier Description' },
-            { key: 'SKU', label: 'SKU' },
-            { key: 'Weight', label: 'Weight' },
-            { key: 'Price', label: 'Price' },
-            { key: 'From', label: 'From' },
-            { key: 'To', label: 'To' }
-          ]
-        },
-        logistic: {
-          columns: [
-            { key: 'Logistic From', label: 'Logistic From' },
-            { key: 'Logistic To', label: 'Logistic To' },
-            { key: 'Additional Charge', label: 'Additional Charge' }
-          ]
-        },
-        packweight: {
-          columns: [
-            { key: 'Pack From', label: 'Pack From' },
-            { key: 'Pack To', label: 'Pack To' },
-            { key: 'Additional Charge', label: 'Additional Charge' }
-          ]
         }
-      };
+        continue; // move to next Azelis group
+      }
 
-      // Add empty row to current table
-      const addRow = () => {
-        const emptyRow = {};
-        tableDefinitions[activeTab].columns.forEach(
-          col => (emptyRow[col.key] = '')
-        );
-        
-        switch (activeTab) {
-          case 'azelis':
-            setAzelisData([...azelisData, emptyRow]);
-            break;
-          case 'supplier':
-            setSupplierData([...supplierData, emptyRow]);
-            break;
-          case 'logistic':
-            setLogisticData([...logisticData, emptyRow]);
-            break;
-          case 'packweight':
-            setPackweightData([...packweightData, emptyRow]);
-            break;
-          default:
-            break;
+      // Group bestMatches by SKU to handle price breaks
+      const skuGroups = {};
+      for (let supRow of bestMatches) {
+        const skuVal = supRow['SKU'] || '';
+        if (!skuGroups[skuVal]) {
+          skuGroups[skuVal] = [];
         }
-      };
+        skuGroups[skuVal].push(supRow);
+      }
 
-      // Process the data (new logic demonstration)
-      const processData = () => {
-        try {
-          // Filter out empty rows
-          const cleanAzelisData = azelisData.filter(row =>
-            Object.values(row).some(val => String(val).trim() !== '')
-          );
-          const cleanSupplierData = supplierData.filter(row =>
-            Object.values(row).some(val => String(val).trim() !== '')
-          );
-          // logisticData and packweightData also available if needed
-          // but for demonstration, let's focus on matching Azelis vs. Supplier
+      // Process each Azelis row in the group
+      for (let azRow of azRows) {
+        const azWeight = floatify(azRow['Azelis Pack Weight']);
 
-          // We'll build results by matching each Azelis row
-          // with the "same index" Supplier row (if it exists)
-          const newResults = [];
-          const limit = Math.min(cleanAzelisData.length, cleanSupplierData.length);
+        // Find best SKU by closest weight
+        let bestSKU = null;
+        let bestWeightDiff = Infinity;
 
-          for (let i = 0; i < limit; i++) {
-            const azRow = cleanAzelisData[i];
-            const supRow = cleanSupplierData[i];
+        // We look across all SKUs in bestMatches
+        for (let [sku, supRows] of Object.entries(skuGroups)) {
+          for (let supRow of supRows) {
+            const supWt = supRow['Weight'];
+            if (azWeight !== null && supWt !== null) {
+              const diff = Math.abs(azWeight - supWt);
+              if (diff < bestWeightDiff) {
+                bestWeightDiff = diff;
+                bestSKU = sku;
+              }
+            }
+          }
+        }
 
-            // Pull relevant fields for scoring
-            const azDesc = azRow['Description'] || '';
-            const azWeight = azRow['PackWeight'] || 0;
-            const supDesc = supRow['Supplier Description'] || '';
-            const supWeight = supRow['Weight'] || 0;
+        if (bestSKU) {
+          // create entry for each "price break" row in that SKU
+          for (let supRow of skuGroups[bestSKU]) {
+            const supWeight = supRow['Weight'];
+            const supDesc = supRow['Supplier Description'];
+            const supPrice = supRow['Price'];
+            const supFrom = supRow['From'];
+            const supTo = supRow['To'];
 
-            // Calculate scores
-            const { descScore, wtScore, totalScore } = calculateAllScores(
-              azDesc,
+            // Score with final desc + weight
+            const [dScore, wScore, tScore] = calculateAllScores(
+              azRow['Azelis Description'],
               azWeight,
               supDesc,
               supWeight
             );
 
-            newResults.push({
-              'Azelis Code': azRow['Azelis Code'],
-              'Azelis Description': azDesc,
-              'Supplier Description': supDesc,
-              descScore,
-              wtScore,
-              totalScore
-            });
+            // Build line
+            let lineObj = {
+              'Azelis Code': azRow['Azelis Code'] || '',
+              'Azelis Description': azRow['Azelis Description'] || '',
+              'Azelis Pack Weight': azWeight !== null ? azWeight : '',
+              'Matched Supplier Description': supDesc || '',
+              'Matched Supplier SKU': supRow['SKU'] || '',
+              'Matched Supplier Weight': supWeight !== null ? supWeight : '',
+              'Matched Supplier Price': floatify(supPrice) || 0,
+              'Matched Supplier From': supFrom || '',
+              'Matched Supplier To': supTo || '',
+              'Pack Weight Surcharge': 0,
+              'Logistic Surcharge': 0,
+              'Description Match Score': dScore,
+              'Weight Match Score': wScore,
+              'Total Score': tScore
+            };
+
+            // 1) Apply pack weight surcharges
+            lineObj = applyPackWeightSurcharges(lineObj, cleanPackWeight);
+
+            // 2) Apply logistic surcharges => may produce multiple lines
+            let linesAfterLogistics = applyLogisticSurcharges(lineObj, cleanLogistic);
+
+            // Add them to final
+            finalRows.push(...linesAfterLogistics);
+          }
+        } else {
+          // No weight match found
+          finalRows.push({
+            'Azelis Code': azRow['Azelis Code'] || '',
+            'Azelis Description': azRow['Azelis Description'] || '',
+            'Azelis Pack Weight': azWeight !== null ? azWeight : '',
+            'Matched Supplier Description': 'No Weight Match Found',
+            'Matched Supplier SKU': '',
+            'Matched Supplier Weight': '',
+            'Matched Supplier Price': '',
+            'Matched Supplier From': '',
+            'Matched Supplier To': '',
+            'Pack Weight Surcharge': '',
+            'Logistic Surcharge': '',
+            'Description Match Score': bestScore, // from desc group
+            'Weight Match Score': '',
+            'Total Score': ''
+          });
+        }
+      }
+    }
+
+    return finalRows;
+  }
+
+  /***************************************************************************
+   * 3) EditableTable + Main React App
+   ***************************************************************************/
+
+  // A simpler Alert
+  const Alert = ({ children }) => {
+    return (
+      <div className="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+        {children}
+      </div>
+    );
+  };
+
+  // Table for entering data
+  const EditableTable = ({ columns, data, setData }) => {
+    const handlePaste = (e, rowIndex, colIndex) => {
+      e.preventDefault();
+      const pastedText = e.clipboardData.getData('text');
+      const rows = pastedText.split(/\r\n|\n|\r/).filter(row => row.trim());
+      
+      // Split each row by tabs or multiple spaces
+      const pastedData = rows.map(row => row.split(/\t|\s{2,}/));
+
+      setData(current => {
+        const newData = [...current];
+        pastedData.forEach((rowVals, i) => {
+          const targetRow = rowIndex + i;
+          while (newData.length <= targetRow) {
+            // add empty row
+            const emptyRow = {};
+            columns.forEach(col => (emptyRow[col.key] = ''));
+            newData.push(emptyRow);
           }
 
-          setResults(newResults);
-          setError('');
-        } catch (err) {
-          setError('Error processing data: ' + err.message);
-        }
-      };
-
-      // Export results to Excel
-      const exportResults = () => {
-        if (results.length === 0) return;
-        
-        const ws = XLSX.utils.json_to_sheet(results);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Results");
-        XLSX.writeFile(wb, "match_results.xlsx");
-      };
-
-      // Reset all data
-      const resetAll = () => {
-        setAzelisData(createEmptyRows({ 'Azelis Code': '', 'Description': '', 'PackWeight': '' }));
-        setSupplierData(
-          createEmptyRows({
-            'Supplier Description': '',
-            'SKU': '',
-            'Weight': '',
-            'Price': '',
-            'From': '',
-            'To': ''
-          })
-        );
-        setLogisticData(
-          createEmptyRows({
-            'Logistic From': '',
-            'Logistic To': '',
-            'Additional Charge': ''
-          })
-        );
-        setPackweightData(
-          createEmptyRows({
-            'Pack From': '',
-            'Pack To': '',
-            'Additional Charge': ''
-          })
-        );
-        setResults([]);
-        setError('');
-      };
-
-      // Determine which table data to show
-      const getCurrentTableData = () => {
-        switch (activeTab) {
-          case 'azelis': return { data: azelisData, setData: setAzelisData };
-          case 'supplier': return { data: supplierData, setData: setSupplierData };
-          case 'logistic': return { data: logisticData, setData: setLogisticData };
-          case 'packweight': return { data: packweightData, setData: setPackweightData };
-          default: return { data: [], setData: () => {} };
-        }
-      };
-
-      return (
-        <div className="max-w-full p-4">
-          <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-            <h1 className="text-2xl font-bold mb-4">Match App</h1>
-
-            {/* Buttons */}
-            <div className="flex gap-4 mb-4">
-              <button
-                onClick={processData}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-              >
-                Process Data
-              </button>
-              <button
-                onClick={exportResults}
-                disabled={results.length === 0}
-                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 
-                           disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Export Results
-              </button>
-              <button
-                onClick={resetAll}
-                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-              >
-                Reset
-              </button>
-            </div>
-
-            {/* Error Alert */}
-            {error && <Alert>{error}</Alert>}
-
-            {/* Tabs + Table */}
-            <div className="mb-4">
-              <div className="border-b border-gray-200">
-                <nav className="-mb-px flex space-x-8">
-                  {Object.keys(tableDefinitions).map((tab) => (
-                    <button
-                      key={tab}
-                      onClick={() => setActiveTab(tab)}
-                      className={`tab-button border-b-2 px-1 py-4 text-sm font-medium
-                        ${
-                          activeTab === tab
-                            ? 'border-blue-500 text-blue-600'
-                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                        }`}
-                    >
-                      {tab.charAt(0).toUpperCase() + tab.slice(1)} Data
-                    </button>
-                  ))}
-                </nav>
-              </div>
-
-              <div className="mt-4">
-                <div className="mb-2 text-sm text-gray-600">
-                  Tip: You can paste data directly from Excel. Select the cell where you want to start pasting.
-                </div>
-
-                <EditableTable
-                  columns={tableDefinitions[activeTab].columns}
-                  {...getCurrentTableData()}
-                />
-                
-                <div className="mt-2">
-                  <button
-                    onClick={addRow}
-                    className="px-2 py-1 bg-gray-200 text-sm rounded hover:bg-gray-300"
-                  >
-                    + Add Row
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Results */}
-            {results.length > 0 && (
-              <div className="mt-4 overflow-x-auto">
-                <h2 className="text-xl font-bold mb-2">Results</h2>
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      {Object.keys(results[0]).map((header) => (
-                        <th
-                          key={header}
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                        >
-                          {header}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {results.map((row, idx) => (
-                      <tr key={idx}>
-                        {Object.entries(row).map(([key, value]) => (
-                          <td
-                            key={key}
-                            className="px-6 py-4 whitespace-nowrap text-sm text-gray-500"
-                          >
-                            {value}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-          <div className="text-sm text-gray-500">Created by Greg Michell</div>
-        </div>
-      );
+          rowVals.forEach((cell, j) => {
+            const colKey = columns[colIndex + j]?.key;
+            if (colKey) {
+              newData[targetRow][colKey] = cell.trim();
+            }
+          });
+        });
+        return newData;
+      });
     };
 
-    // Render the MatchApp into #root
-    ReactDOM.render(<MatchApp />, document.getElementById('root'));
+    const handleChange = (rowIndex, colKey, value) => {
+      setData(current => {
+        const newData = [...current];
+        newData[rowIndex] = { ...newData[rowIndex], [colKey]: value };
+        return newData;
+      });
+    };
+
+    return (
+      <div className="border rounded" style={{ height: '600px' }}>
+        <div className="overflow-auto h-full">
+          <table className="w-full table-fixed bg-white">
+            <thead className="sticky top-0 bg-gray-50 z-10">
+              <tr>
+                {columns.map(col => (
+                  <th
+                    key={col.key}
+                    className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-r"
+                    style={{ width: col.width || '150px' }}
+                  >
+                    {col.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((row, r) => (
+                <tr key={r} className="border-b hover:bg-gray-50">
+                  {columns.map((col, c) => (
+                    <td key={col.key} className="border-r p-0">
+                      <input
+                        type="text"
+                        value={row[col.key] || ''}
+                        onChange={(e) => handleChange(r, col.key, e.target.value)}
+                        onPaste={(e) => handlePaste(e, r, c)}
+                        className="w-full h-8 px-3 border-0 focus:ring-1 focus:ring-blue-500 focus:ring-opacity-50 focus:outline-none"
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  // MAIN APP
+  const MatchApp = () => {
+    const [activeTab, setActiveTab] = React.useState('azelis');
+    const [error, setError] = React.useState('');
+    const [results, setResults] = React.useState([]);
+
+    // We want 4 tables: Azelis, Supplier, Logistic, PackWeight
+    const createRows = (cols, count=1000) => {
+      const emptyRow = {};
+      cols.forEach(c => { emptyRow[c.key] = ''; });
+      return Array.from({ length: count }, () => ({ ...emptyRow }));
+    };
+
+    // Table definitions with the relevant columns:
+    const tableDefs = {
+      azelis: {
+        columns: [
+          { key: 'Azelis Code', label: 'Azelis Code', width: '150px' },
+          { key: 'Description', label: 'Description', width: '300px' }
+        ]
+      },
+      supplier: {
+        columns: [
+          { key: 'Supplier Description', label: 'Supplier Description', width: '300px' },
+          { key: 'SKU', label: 'SKU' },
+          { key: 'Weight', label: 'Weight' },
+          { key: 'Price', label: 'Price' },
+          { key: 'From', label: 'From' },
+          { key: 'To', label: 'To' }
+        ]
+      },
+      logistic: {
+        columns: [
+          { key: 'Logistic From', label: 'Logistic From' },
+          { key: 'Logistic To', label: 'Logistic To' },
+          { key: 'Additional Charge', label: 'Additional Charge' }
+        ]
+      },
+      packweight: {
+        columns: [
+          { key: 'Pack From', label: 'Pack From' },
+          { key: 'Pack To', label: 'Pack To' },
+          { key: 'Additional Charge', label: 'Additional Charge' }
+        ]
+      }
+    };
+
+    // Initialize the data for each
+    const [azelisData, setAzelisData] = React.useState(
+      createRows(tableDefs.azelis.columns, 500)
+    );
+    const [supplierData, setSupplierData] = React.useState(
+      createRows(tableDefs.supplier.columns, 500)
+    );
+    const [logisticData, setLogisticData] = React.useState(
+      createRows(tableDefs.logistic.columns, 200)
+    );
+    const [packweightData, setPackweightData] = React.useState(
+      createRows(tableDefs.packweight.columns, 200)
+    );
+
+    // Add row to the active table
+    const addRow = () => {
+      switch (activeTab) {
+        case 'azelis':
+          setAzelisData(current => [...current, {}]);
+          break;
+        case 'supplier':
+          setSupplierData(current => [...current, {}]);
+          break;
+        case 'logistic':
+          setLogisticData(current => [...current, {}]);
+          break;
+        case 'packweight':
+          setPackweightData(current => [...current, {}]);
+          break;
+      }
+    };
+
+    // Helper for returning data+setter for the active tab
+    const getActiveTable = () => {
+      switch (activeTab) {
+        case 'azelis': return { data: azelisData, setData: setAzelisData, columns: tableDefs.azelis.columns };
+        case 'supplier': return { data: supplierData, setData: setSupplierData, columns: tableDefs.supplier.columns };
+        case 'logistic': return { data: logisticData, setData: setLogisticData, columns: tableDefs.logistic.columns };
+        case 'packweight': return { data: packweightData, setData: setPackweightData, columns: tableDefs.packweight.columns };
+        default: return { data: [], setData: () => {}, columns: [] };
+      }
+    };
+
+    // Filter out truly empty rows
+    function cleanRows(rows, columns) {
+      return rows.filter(r =>
+        columns.some(colKey => String(r[colKey.key] || '').trim() !== '')
+      );
+    }
+
+    // PROCESS DATA => replicate Python logic, produce final results
+    const processData = () => {
+      try {
+        const azelisCols = tableDefs.azelis.columns;
+        const supplierCols = tableDefs.supplier.columns;
+        const logisticCols = tableDefs.logistic.columns;
+        const packweightCols = tableDefs.packweight.columns;
+
+        const cleanAzelis = cleanRows(azelisData, azelisCols);
+        const cleanSupplier = cleanRows(supplierData, supplierCols);
+        const cleanLogistic = cleanRows(logisticData, logisticCols);
+        const cleanPackweight = cleanRows(packweightData, packweightCols);
+
+        // This function does the heavy-lifting to produce final rows
+        const finalRows = processDataframes(
+          cleanAzelis,
+          cleanSupplier,
+          cleanLogistic,
+          cleanPackweight
+        );
+
+        setResults(finalRows);
+        setError('');
+      } catch (err) {
+        setError('Error processing data: ' + err.message);
+      }
+    };
+
+    // Export results to Excel
+    const exportResults = () => {
+      if (results.length === 0) return;
+      const ws = XLSX.utils.json_to_sheet(results);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Results");
+      XLSX.writeFile(wb, "match_results.xlsx");
+    };
+
+    // Reset everything
+    const resetAll = () => {
+      setAzelisData(createRows(tableDefs.azelis.columns, 500));
+      setSupplierData(createRows(tableDefs.supplier.columns, 500));
+      setLogisticData(createRows(tableDefs.logistic.columns, 200));
+      setPackweightData(createRows(tableDefs.packweight.columns, 200));
+      setResults([]);
+      setError('');
+    };
+
+    // Render
+    const currentTab = getActiveTable();
+
+    return (
+      <div className="max-w-full p-4">
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+          <h1 className="text-2xl font-bold mb-4">Match App (Python Logic Replicated)</h1>
+
+          <div className="flex gap-4 mb-4">
+            <button
+              onClick={processData}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Process Data
+            </button>
+            <button
+              onClick={exportResults}
+              disabled={results.length === 0}
+              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 
+                        disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Export Results
+            </button>
+            <button
+              onClick={resetAll}
+              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+            >
+              Reset
+            </button>
+          </div>
+
+          {error && <Alert>{error}</Alert>}
+
+          <div className="mb-4">
+            <div className="border-b border-gray-200">
+              <nav className="-mb-px flex space-x-8">
+                {Object.keys(tableDefs).map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`border-b-2 px-1 py-4 text-sm font-medium
+                      ${activeTab === tab
+                        ? 'border-blue-500 text-blue-600'
+                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                      }`}
+                  >
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)} Data
+                  </button>
+                ))}
+              </nav>
+            </div>
+
+            <div className="mt-4">
+              <div className="mb-2 text-sm text-gray-600">
+                Tip: Paste data directly from Excel. Select the cell where you want to start pasting.
+              </div>
+              <EditableTable
+                columns={currentTab.columns}
+                data={currentTab.data}
+                setData={currentTab.setData}
+              />
+              <div className="mt-2">
+                <button
+                  onClick={addRow}
+                  className="px-2 py-1 bg-gray-200 text-sm rounded hover:bg-gray-300"
+                >
+                  + Add Row
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {results.length > 0 && (
+            <div className="mt-4 overflow-x-auto">
+              <h2 className="text-xl font-bold mb-2">Results</h2>
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    {Object.keys(results[0]).map(header => (
+                      <th
+                        key={header}
+                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                      >
+                        {header}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {results.map((row, idx) => (
+                    <tr key={idx}>
+                      {Object.entries(row).map(([key, value]) => (
+                        <td
+                          key={key}
+                          className="px-6 py-4 whitespace-nowrap text-sm text-gray-500"
+                        >
+                          {value}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+        <div className="text-sm text-gray-500">Created by Greg Michell</div>
+      </div>
+    );
+  };
+
+  // Render
+  ReactDOM.render(<MatchApp />, document.getElementById('root'));
   </script>
 </body>
 </html>
