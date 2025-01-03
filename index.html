@@ -388,41 +388,63 @@ function calculateAllScores(azDesc, azPackWeight, supDesc, supWeight) {
         continue; // move to next Azelis group
       }
 
-      // Group bestMatches by SKU to handle price breaks
-      const skuGroups = {};
+    
+// Group bestMatches by description and weight to handle price breaks
+      const descWeightGroups = {};
       for (let supRow of bestMatches) {
-        const skuVal = supRow['SKU'] || '';
-        if (!skuGroups[skuVal]) {
-          skuGroups[skuVal] = [];
+        const supDesc = (supRow['Supplier Description'] || '').toLowerCase();
+        const supWeight = floatify(supRow['Weight']);
+        const groupKey = `${supDesc}|${supWeight}`; // Combine desc and weight as key
+        if (!descWeightGroups[groupKey]) {
+          descWeightGroups[groupKey] = [];
         }
-        skuGroups[skuVal].push(supRow);
+        descWeightGroups[groupKey].push(supRow);
       }
 
       // Process each Azelis row in the group
       for (let azRow of azRows) {
         const azWeight = floatify(azRow['Azelis Pack Weight']);
 
-        // Find best SKU by closest weight
-        let bestSKU = null;
+        // Find best match by closest weight and description
+        let bestGroupKey = null;
         let bestWeightDiff = Infinity;
+        let bestDescScore = -1;
 
-        // We look across all SKUs in bestMatches
-        for (let [sku, supRows] of Object.entries(skuGroups)) {
-          for (let supRow of supRows) {
-            const supWt = supRow['Weight'];
-            if (azWeight !== null && supWt !== null) {
-              const diff = Math.abs(azWeight - supWt);
-              if (diff < bestWeightDiff) {
-                bestWeightDiff = diff;
-                bestSKU = sku;
+        // Look across all description+weight groups in bestMatches
+        for (let [groupKey, supRows] of Object.entries(descWeightGroups)) {
+          // Each group already has same desc+weight, so we can check first row
+          const supRow = supRows[0];
+          const supWt = floatify(supRow['Weight']);
+          const supDesc = supRow['Supplier Description'];
+          
+          // Calculate scores for this potential match
+          const [dScore, , ] = calculateAllScores(
+            azRow['Azelis Description'],
+            null,
+            supDesc,
+            null
+          );
+
+          if (azWeight !== null && supWt !== null) {
+            const weightDiff = Math.abs(azWeight - supWt);
+            // Prioritize weight match if description scores are close
+            if (dScore >= bestDescScore - 5) { // Within 5% of best desc score
+              if (weightDiff < bestWeightDiff) {
+                bestWeightDiff = weightDiff;
+                bestGroupKey = groupKey;
+                bestDescScore = dScore;
               }
+            } else if (dScore > bestDescScore) {
+              bestWeightDiff = weightDiff;
+              bestGroupKey = groupKey;
+              bestDescScore = dScore;
             }
           }
         }
 
-        if (bestSKU) {
-          // create entry for each "price break" row in that SKU
-          for (let supRow of skuGroups[bestSKU]) {
+        if (bestGroupKey) {
+          // Create entry for each "price break" row in that description+weight group
+          for (let supRow of descWeightGroups[bestGroupKey]) {
             const supWeight = supRow['Weight'];
             const supDesc = supRow['Supplier Description'];
             const supPrice = supRow['Price'];
