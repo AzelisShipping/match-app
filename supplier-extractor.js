@@ -4,11 +4,27 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
 const SupplierExtractor = () => {
+  const [apiKey, setApiKey] = useState('');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [files, setFiles] = useState([]);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const apiKey = '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';
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if (apiKey) {
+      setIsLoggedIn(true);
+      setError('');
+    }
+  };
+
+  const handleLogout = () => {
+    setApiKey('');
+    setIsLoggedIn(false);
+    setFiles([]);
+    setResults([]);
+  };
 
   const handleFileUpload = (event) => {
     setFiles(Array.from(event.target.files));
@@ -16,11 +32,6 @@ const SupplierExtractor = () => {
   };
 
   const processFiles = async () => {
-    if (!apiKey) {
-      setError('Please enter your OpenAI API key');
-      return;
-    }
-
     setLoading(true);
     setError('');
     const processed = [];
@@ -88,15 +99,53 @@ const SupplierExtractor = () => {
     XLSX.writeFile(wb, "supplier_data.xlsx");
   };
 
+  if (!isLoggedIn) {
+    return (
+      <Card className="w-full max-w-md mx-auto mt-8">
+        <CardHeader>
+          <CardTitle>Login with OpenAI API Key</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">
+                API Key
+              </label>
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Login
+            </button>
+          </form>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="w-full max-w-4xl mx-auto">
       <CardHeader>
-        <CardTitle>Supplier Information Extractor</CardTitle>
+        <div className="flex justify-between items-center">
+          <CardTitle>Supplier Information Extractor</CardTitle>
+          <button
+            onClick={handleLogout}
+            className="px-3 py-1 bg-gray-200 text-sm rounded hover:bg-gray-300"
+          >
+            Logout
+          </button>
+        </div>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
-    
-
           <div>
             <label className="block text-sm font-medium text-gray-700">
               Upload Files (PDF/Excel)
