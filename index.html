@@ -25,21 +25,154 @@
 </head>
 <body>
   
-  <!-- A root div where our React app will be rendered -->
+  <!-- Root div for our React app -->
   <div id="root"></div>
   
-  <!-- Our React Code using Babel in the browser -->
+  <!-- React code with Babel in the browser -->
   <script type="text/babel">
-    // A simple Alert component to mimic error display
+    // -------------------------------------------
+    // 1) SCORING LOGIC (JavaScript version)
+    // -------------------------------------------
+    function calculateAllScores(azDesc, azPackWeight, supDesc, supWeight) {
+      let descScore = 0;
+      let wtScore = 0;
+
+      // Helper to clean text
+      function cleanText(text) {
+        const str = String(text).toLowerCase();
+        // remove special chars ®™©()[],.;:'"
+        const noSpecial = str.replace(/[®™©()\[\],.;:'"]+/g, '');
+        // normalize spacing
+        return noSpecial.trim().replace(/\s+/g, ' ');
+      }
+
+      const azDescClean = cleanText(azDesc);
+      const supDescClean = cleanText(supDesc);
+
+      // For exact matching (no spaces)
+      const azNoSpace = azDescClean.replace(/\s+/g, '');
+      const supNoSpace = supDescClean.replace(/\s+/g, '');
+
+      // ---- DESCRIPTION SCORE ----
+      if (azDescClean && supDescClean) {
+        // Exact match
+        if (azDescClean === supDescClean || azNoSpace === supNoSpace) {
+          descScore = 100.0;
+        }
+        // Partial match (with spaces)
+        else if (
+          azDescClean.includes(supDescClean) ||
+          supDescClean.includes(azDescClean)
+        ) {
+          descScore = 90.0;
+        }
+        // Partial match (no spaces)
+        else if (
+          azNoSpace.includes(supNoSpace) ||
+          supNoSpace.includes(azNoSpace)
+        ) {
+          descScore = 85.0;
+        } else {
+          // Word-based logic
+          function getWordScore(word1, word2) {
+            if (word1 === word2) {
+              return 1.0;
+            }
+            // handle suffixes
+            const suffixes = ['s', 'se', 'sse', 'es'];
+            for (let suffix of suffixes) {
+              if (word1.endsWith(suffix)) {
+                const base1 = word1.slice(0, -suffix.length);
+                if (word2.startsWith(base1)) {
+                  return 0.9;
+                }
+              }
+              if (word2.endsWith(suffix)) {
+                const base2 = word2.slice(0, -suffix.length);
+                if (word1.startsWith(base2)) {
+                  return 0.9;
+                }
+              }
+            }
+            // partial match for words > 3 chars
+            const minLen = Math.min(word1.length, word2.length);
+            if (minLen > 3) {
+              if (
+                word1.slice(0, minLen - 1) ===
+                word2.slice(0, minLen - 1)
+              ) {
+                return 0.8;
+              }
+            }
+            return 0.0;
+          }
+
+          const azWords = azDescClean.split(' ');
+          const supWords = supDescClean.split(' ');
+          let wordMatches = 0;
+          const usedSupWords = new Set();
+
+          for (let azWord of azWords) {
+            let bestScore = 0;
+            let bestMatch = null;
+            for (let supWord of supWords) {
+              if (!usedSupWords.has(supWord)) {
+                const score = getWordScore(azWord, supWord);
+                if (score > bestScore) {
+                  bestScore = score;
+                  bestMatch = supWord;
+                }
+              }
+            }
+            if (bestMatch && bestScore > 0) {
+              wordMatches += bestScore;
+              usedSupWords.add(bestMatch);
+            }
+          }
+
+          const totalWords = Math.max(azWords.length, supWords.length);
+          if (totalWords > 0) {
+            descScore = (wordMatches / totalWords) * 80.0;
+          }
+        }
+      }
+
+      // ---- WEIGHT SCORE ----
+      const azNum = parseFloat(azPackWeight);
+      const supNum = parseFloat(supWeight);
+
+      if (!isNaN(azNum) && !isNaN(supNum)) {
+        const diff = Math.abs(azNum - supNum);
+        wtScore = Math.max(0, 100 - diff);
+      }
+
+      // ---- TOTAL SCORE ----
+      const totalScore = (0.7 * descScore) + (0.3 * wtScore);
+
+      return {
+        descScore: parseFloat(descScore.toFixed(2)),
+        wtScore: parseFloat(wtScore.toFixed(2)),
+        totalScore: parseFloat(totalScore.toFixed(2))
+      };
+    }
+
+    // -------------------------------------------
+    // 2) ALERT COMPONENT (simple placeholder)
+    // -------------------------------------------
     const Alert = ({ children }) => {
       return (
-        <div className="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+        <div
+          className="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative"
+          role="alert"
+        >
           {children}
         </div>
       );
     };
 
-    // EditableTable component
+    // -------------------------------------------
+    // 3) EDITABLE TABLE COMPONENT
+    // -------------------------------------------
     const EditableTable = ({ columns, data, setData }) => {
       const handlePaste = (e, rowIndex, colIndex) => {
         e.preventDefault();
@@ -92,7 +225,8 @@
                       className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-r"
                       style={{
                         width:
-                          column.key === 'Description' || column.key === 'Supplier Description'
+                          column.key === 'Description' ||
+                          column.key === 'Supplier Description'
                             ? '300px'
                             : '150px',
                       }}
@@ -125,9 +259,13 @@
       );
     };
 
-    // Main App component
+    // -------------------------------------------
+    // 4) MAIN APP COMPONENT
+    // -------------------------------------------
     const MatchApp = () => {
+      // Tab state
       const [activeTab, setActiveTab] = React.useState('azelis');
+      // Error and results
       const [error, setError] = React.useState('');
       const [results, setResults] = React.useState([]);
 
@@ -137,9 +275,9 @@
           .fill()
           .map(() => ({ ...template }));
 
-      // Table states
+      // Table data states
       const [azelisData, setAzelisData] = React.useState(
-        createEmptyRows({ 'Azelis Code': '', 'Description': '' })
+        createEmptyRows({ 'Azelis Code': '', 'Description': '', 'PackWeight': '' })
       );
       const [supplierData, setSupplierData] = React.useState(
         createEmptyRows({
@@ -171,7 +309,8 @@
         azelis: {
           columns: [
             { key: 'Azelis Code', label: 'Azelis Code' },
-            { key: 'Description', label: 'Description' }
+            { key: 'Description', label: 'Description' },
+            { key: 'PackWeight', label: 'PackWeight' }
           ]
         },
         supplier: {
@@ -225,26 +364,53 @@
         }
       };
 
-      // Process the data
+      // Process the data (new logic demonstration)
       const processData = () => {
         try {
           // Filter out empty rows
           const cleanAzelisData = azelisData.filter(row =>
-            Object.values(row).some(val => val.trim() !== '')
+            Object.values(row).some(val => String(val).trim() !== '')
           );
           const cleanSupplierData = supplierData.filter(row =>
-            Object.values(row).some(val => val.trim() !== '')
+            Object.values(row).some(val => String(val).trim() !== '')
           );
-          const cleanLogisticData = logisticData.filter(row =>
-            Object.values(row).some(val => val.trim() !== '')
-          );
-          const cleanPackweightData = packweightData.filter(row =>
-            Object.values(row).some(val => val.trim() !== '')
-          );
+          // logisticData and packweightData also available if needed
+          // but for demonstration, let's focus on matching Azelis vs. Supplier
 
-          // TODO: Implement your matching logic here
-          // For demonstration, simply store azelisData in results
-          setResults(cleanAzelisData);
+          // We'll build results by matching each Azelis row
+          // with the "same index" Supplier row (if it exists)
+          const newResults = [];
+          const limit = Math.min(cleanAzelisData.length, cleanSupplierData.length);
+
+          for (let i = 0; i < limit; i++) {
+            const azRow = cleanAzelisData[i];
+            const supRow = cleanSupplierData[i];
+
+            // Pull relevant fields for scoring
+            const azDesc = azRow['Description'] || '';
+            const azWeight = azRow['PackWeight'] || 0;
+            const supDesc = supRow['Supplier Description'] || '';
+            const supWeight = supRow['Weight'] || 0;
+
+            // Calculate scores
+            const { descScore, wtScore, totalScore } = calculateAllScores(
+              azDesc,
+              azWeight,
+              supDesc,
+              supWeight
+            );
+
+            newResults.push({
+              'Azelis Code': azRow['Azelis Code'],
+              'Azelis Description': azDesc,
+              'Supplier Description': supDesc,
+              descScore,
+              wtScore,
+              totalScore
+            });
+          }
+
+          setResults(newResults);
           setError('');
         } catch (err) {
           setError('Error processing data: ' + err.message);
@@ -255,7 +421,6 @@
       const exportResults = () => {
         if (results.length === 0) return;
         
-        // XLSX is a global variable from the script tag
         const ws = XLSX.utils.json_to_sheet(results);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Results");
@@ -264,7 +429,7 @@
 
       // Reset all data
       const resetAll = () => {
-        setAzelisData(createEmptyRows({ 'Azelis Code': '', 'Description': '' }));
+        setAzelisData(createEmptyRows({ 'Azelis Code': '', 'Description': '', 'PackWeight': '' }));
         setSupplierData(
           createEmptyRows({
             'Supplier Description': '',
@@ -293,6 +458,7 @@
         setError('');
       };
 
+      // Determine which table data to show
       const getCurrentTableData = () => {
         switch (activeTab) {
           case 'azelis': return { data: azelisData, setData: setAzelisData };
@@ -308,6 +474,7 @@
           <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
             <h1 className="text-2xl font-bold mb-4">Match App</h1>
 
+            {/* Buttons */}
             <div className="flex gap-4 mb-4">
               <button
                 onClick={processData}
@@ -331,8 +498,10 @@
               </button>
             </div>
 
+            {/* Error Alert */}
             {error && <Alert>{error}</Alert>}
 
+            {/* Tabs + Table */}
             <div className="mb-4">
               <div className="border-b border-gray-200">
                 <nav className="-mb-px flex space-x-8">
@@ -374,6 +543,7 @@
               </div>
             </div>
 
+            {/* Results */}
             {results.length > 0 && (
               <div className="mt-4 overflow-x-auto">
                 <h2 className="text-xl font-bold mb-2">Results</h2>
@@ -393,9 +563,9 @@
                   <tbody className="bg-white divide-y divide-gray-200">
                     {results.map((row, idx) => (
                       <tr key={idx}>
-                        {Object.values(row).map((value, i) => (
+                        {Object.entries(row).map(([key, value]) => (
                           <td
-                            key={i}
+                            key={key}
                             className="px-6 py-4 whitespace-nowrap text-sm text-gray-500"
                           >
                             {value}
