@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Match App (Best Matching Method)</title>
+  <title>Match App (Stricter Matching)</title>
   <!-- Tailwind CSS from CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- React, ReactDOM, and Babel from CDN -->
@@ -31,14 +31,13 @@
    * 1) Utility Functions
    ***************************************************************************/
 
-
   // Safely parse a string or number to float. Returns null if invalid.
   function floatify(val) {
     const num = parseFloat(val);
     return isNaN(num) ? null : num;
   }
 
-  // Example: If "Azelis Code" includes "123KG", we parse out "123"
+  // Example: If "Azelis Code" includes "123KG", parse out "123" as a number
   function splitData(s) {
     const str = String(s);
     // Look for any digits that come before "KG"
@@ -50,18 +49,16 @@
   }
 
   /**
-   * Jaro–Winkler Distance Implementation
-   * - Returns a similarity score between 0 and 1 (1 = identical).
-   *   We'll use (score * 100) to interpret it as a percentage.
+   * Jaro–Winkler Distance
+   * Returns a similarity from 0..1 (1 = identical).
    */
   function jaroWinkler(str1, str2) {
-    // Clean up input
     const s1 = str1.toLowerCase().trim();
     const s2 = str2.toLowerCase().trim();
 
     if (s1 === s2) return 1.0;
 
-    // The matching window is floor(maxLen/2) - 1
+    // Matching window
     const matchDist = Math.floor(Math.max(s1.length, s2.length) / 2) - 1;
 
     const s1Matches = new Array(s1.length).fill(false);
@@ -70,7 +67,7 @@
     let matches = 0;
     let transpositions = 0;
 
-    // 1) Find matches
+    // Find matches
     for (let i = 0; i < s1.length; i++) {
       const start = Math.max(0, i - matchDist);
       const end = Math.min(s2.length - 1, i + matchDist);
@@ -87,112 +84,59 @@
 
     if (!matches) return 0.0;
 
-    // 2) Count transpositions
+    // Count transpositions
     let k = 0;
     for (let i = 0; i < s1.length; i++) {
       if (s1Matches[i]) {
-        while (!s2Matches[k]) {
-          k++;
-        }
-        if (s1[i] !== s2[k]) {
-          transpositions++;
-        }
+        while (!s2Matches[k]) k++;
+        if (s1[i] !== s2[k]) transpositions++;
         k++;
       }
     }
-    transpositions = transpositions / 2.0;
+    transpositions /= 2.0;
 
     const m = matches;
     const jaro = (m / s1.length + m / s2.length + (m - transpositions) / m) / 3.0;
 
-    // 3) Jaro–Winkler: add prefix scale
-    // prefix length (max 4)
+    // Jaro–Winkler: add prefix scale
     let prefix = 0;
     for (let i = 0; i < Math.min(s1.length, s2.length, 4); i++) {
-      if (s1[i] === s2[i]) {
-        prefix++;
-      } else {
-        break;
-      }
+      if (s1[i] === s2[i]) prefix++;
+      else break;
     }
-
-    const p = 0.1; // constant scaling
+    const p = 0.1;
     return jaro + prefix * p * (1 - jaro);
   }
 
   /**
-   * A helper to remove special characters but keep letters, digits, and spaces.
-   * Also collapses multiple spaces down to a single space.
+   * Remove special characters but keep letters, digits, and spaces.
+   * Collapses multiple spaces to one.
    */
   function cleanString(str) {
     if (!str) return '';
     return str
       .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, '')  // keep letters/digits/spaces
+      .replace(/[^a-z0-9\s]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
   }
 
   /**
-   * Our new "best in the world" function to calculate scores:
-   * 1) Thoroughly clean both descriptions.
-   * 2) Compare them with Jaro–Winkler:
-   *      - if similarity ≥ 98%, descScore=100
-   *      - else fallback to word-based or abbreviation logic
-   * 3) Weight Score remains the same structure as before, but slightly stricter if needed.
+   * Fallback for partial overlap if Jaro–Winkler isn’t near 0 or 1.
    */
-  function calculateAllScores(azDesc, azPackWeight, supDesc, supWeight) {
-    // Step 1) Clean strings
-    const azDescClean = cleanString(azDesc);
-    const supDescClean = cleanString(supDesc);
-
-    let descScore = 0;
-    let wtScore = 0;
-
-    // If either description is empty, no match
-    if (!azDescClean || !supDescClean) {
-      return finalizeScores(0, 0);
-    }
-
-    // Step 2) Jaro–Winkler similarity
-    // Convert to % out of 100
-    const jwSimilarity = jaroWinkler(azDescClean, supDescClean) * 100;
-    if (jwSimilarity >= 98.0) {
-      // near-perfect match
-      descScore = 100;
-      wtScore = weightScore(azPackWeight, supWeight);
-      return finalizeScores(descScore, wtScore);
-    }
-
-    // Fallback approach – Word-based partial match & Abbreviation
-    descScore = fallbackWordAbbrevScore(azDescClean, supDescClean, jwSimilarity);
-
-    // Step 3) Weight
-    wtScore = weightScore(azPackWeight, supWeight);
-
-    // Combine
-    return finalizeScores(descScore, wtScore);
-  }
-
-  /**
-   * Fallback scoring if we didn't get a near-perfect Jaro–Winkler match:
-   *  - Use partial word overlap
-   *  - Use first-letter abbreviation
-   *  - Combine with the existing JW similarity as a baseline
-   */
-  function fallbackWordAbbrevScore(azDescClean, supDescClean, jwSimilarity) {
-    // Tokenise by spaces
+  function fallbackWordAbbrevScore(azDescClean, supDescClean, jwSimilarityPct) {
+    // Tokenise
     const azTokens = azDescClean.split(' ');
     const supTokens = supDescClean.split(' ');
 
-    // 1) Word-level overlap
+    // Word-level overlap
     const azSet = new Set(azTokens);
     const supSet = new Set(supTokens);
-    const common = [...azSet].filter(x => supSet.has(x));
+    const commonWords = [...azSet].filter(x => supSet.has(x));
     const maxSize = Math.max(azSet.size, supSet.size) || 1;
-    const wordRatio = common.length / maxSize; // 0..1
+    const wordRatio = commonWords.length / maxSize; // 0..1
 
-    // 2) Abbreviation approach
+    // Abbreviation
     const abbr = (tokens) => tokens.map(t => t[0]).join('');
     const azAbbr = abbr(azTokens);
     const supAbbr = abbr(supTokens);
@@ -202,31 +146,63 @@
     }
 
     // Combine:
-    //  - Weighted Jaro–Winkler: 60%
-    //  - Word Overlap: 30%
-    //  - Abbreviation Bonus: up to 10 points
-    const fallbackScore = jwSimilarity * 0.6 + wordRatio * 30 + abbrBonus;
+    //  - Jaro–Winkler (0..100) as baseline
+    //  - Word Overlap * 30
+    //  - abbrBonus up to 10
+    const fallbackScore = jwSimilarityPct * 0.6 + wordRatio * 30 + abbrBonus;
     // Cap at 99
     return fallbackScore > 99 ? 99 : fallbackScore;
   }
 
   /**
-   * Weight difference => a score out of 100.
-   * Adjust or tighten the logic as desired.
+   * Stricter version of `calculateAllScores`:
+   *   - If Jaro–Winkler < 0.50 => descScore=0
+   *   - If >= 0.98 => descScore=100
+   *   - Else => fallback
+   *   - Then combine with weightScore
+   */
+  function calculateAllScores(azDesc, azWeight, supDesc, supWeight) {
+    const azClean = cleanString(azDesc);
+    const supClean = cleanString(supDesc);
+    if (!azClean || !supClean) {
+      return [0, 0, 0];
+    }
+
+    // Jaro–Winkler 0..1
+    const jwVal = jaroWinkler(azClean, supClean);
+    let descScore;
+
+    if (jwVal >= 0.98) {
+      descScore = 100; // near perfect
+    } else if (jwVal < 0.50) {
+      descScore = 0; // too different
+    } else {
+      // fallback approach
+      const fallback = fallbackWordAbbrevScore(azClean, supClean, jwVal * 100);
+      descScore = Math.min(99, fallback);
+    }
+
+    // Weight
+    const wScore = weightScore(azWeight, supWeight);
+
+    // Combine
+    const total = 0.7 * descScore + 0.3 * wScore;
+    return [
+      parseFloat(descScore.toFixed(2)),
+      parseFloat(wScore.toFixed(2)),
+      parseFloat(total.toFixed(2))
+    ];
+  }
+
+  /**
+   * Weight difference => 100 if identical, degrade with difference.
    */
   function weightScore(azWeight, supWeight) {
     const azNum = floatify(azWeight);
     const supNum = floatify(supWeight);
-    if (azNum === null || supNum === null) {
-      return 0;
-    }
-    const diff = Math.abs(azNum - supNum);
+    if (azNum === null || supNum === null) return 0;
 
-    // Example logic:
-    //   0 difference => 100
-    //   up to 0.1 difference => 95
-    //   up to 0.5 difference => 85
-    //   bigger differences degrade further
+    const diff = Math.abs(azNum - supNum);
     if (diff < 0.00001) {
       return 100;
     } else if (diff <= 0.1) {
@@ -234,26 +210,17 @@
     } else if (diff <= 0.5) {
       return 85;
     } else {
-      // degrade further – for each full unit difference, subtract 2 points
+      // degrade further (arbitrary logic)
       return Math.max(0, 85 - (diff - 0.5) * 2);
     }
   }
 
-  /**
-   * Combine description + weight into final [descScore, wtScore, totalScore].
-   */
-  function finalizeScores(descScore, wtScore) {
-    const total = 0.7 * descScore + 0.3 * wtScore;
-    return [
-      parseFloat(descScore.toFixed(2)),
-      parseFloat(wtScore.toFixed(2)),
-      parseFloat(total.toFixed(2))
-    ];
-  }
+  /***************************************************************************
+   * 2) Surcharges
+   ***************************************************************************/
 
-  // Surcharge 1: Pack Weight
+  // Pack Weight Surcharge
   function applyPackWeightSurcharges(lineObj, packweightRows) {
-    // If no packweight data, just return
     if (!packweightRows || packweightRows.length === 0) {
       return lineObj;
     }
@@ -262,13 +229,12 @@
     let basePrice = floatify(lineObj['Matched Supplier Price']) || 0;
     let totalPwSurcharge = 0;
 
-    // For each pack weight surcharge rule
     for (let row of packweightRows) {
       const pwFrom = floatify(row['Pack From']);
       const pwTo = floatify(row['Pack To']);
       const addVal = floatify(row['Additional Charge']) || 0;
 
-      // Convert missing from/to to -∞ or +∞
+      // null => Infinity
       const fromVal = pwFrom === null ? -Infinity : pwFrom;
       const toVal = pwTo === null ? Infinity : pwTo;
 
@@ -284,15 +250,14 @@
     return lineObj;
   }
 
-  // Surcharge 2: Logistic
+  // Logistic Surcharge
   function applyLogisticSurcharges(lineObj, logisticRows) {
     if (!logisticRows || logisticRows.length === 0) {
       return [lineObj];
     }
 
-    // We'll build an array of final lines to return
     const lines = [];
-    let mainLine = { ...lineObj }; // copy
+    let mainLine = { ...lineObj };
     let basePrice = floatify(mainLine['Matched Supplier Price']) || 0;
     let logisticSum = floatify(mainLine['Logistic Surcharge']) || 0;
     if (!logisticSum) logisticSum = 0;
@@ -300,7 +265,6 @@
     const supFrom = floatify(mainLine['Matched Supplier From']);
     const supTo = floatify(mainLine['Matched Supplier To']);
 
-    // We'll track "extra lines" for logistic surcharges that don't match exactly
     const extraLines = [];
 
     for (let row of logisticRows) {
@@ -308,16 +272,15 @@
       let lTo = floatify(row['Logistic To']);
       let addVal = floatify(row['Additional Charge']) || 0;
 
-      // null => Infinity
       if (lFrom === null) lFrom = -Infinity;
       if (lTo === null) lTo = Infinity;
 
-      // If logistic from/to EXACTLY matches sup_from/sup_to, add it
+      // EXACT match => add to the main line
       if (lFrom === supFrom && lTo === supTo) {
         basePrice += addVal;
         logisticSum += addVal;
       } else {
-        // Create new line
+        // Extra line
         const newLine = { ...mainLine };
         let newPrice = floatify(newLine['Matched Supplier Price']) || 0;
         newPrice += addVal;
@@ -325,7 +288,6 @@
         newLine['Matched Supplier To'] = `(Extra Logistic) ${lTo}`;
         newLine['Matched Supplier Price'] = parseFloat(newPrice.toFixed(2));
         newLine['Logistic Surcharge'] = parseFloat(addVal.toFixed(2));
-        // Blank out the scores in the extra line
         newLine['Description Match Score'] = '';
         newLine['Weight Match Score'] = '';
         newLine['Total Score'] = '';
@@ -333,37 +295,33 @@
       }
     }
 
-    // Update main line
     mainLine['Matched Supplier Price'] = parseFloat(basePrice.toFixed(2));
     mainLine['Logistic Surcharge'] = parseFloat(logisticSum.toFixed(2));
     lines.push(mainLine);
-    // Add extras
     lines.push(...extraLines);
 
     return lines;
   }
 
   /***************************************************************************
-   * 2) Core “Process DataFrames” Logic
+   * 3) Core “Process DataFrames” Logic (with stricter threshold)
    ***************************************************************************/
 
-
   function processDataframes(azelisRows, supplierRows, logisticRows, packweightRows) {
-    // 1) Clean and parse Azelis data
+    // 1) Clean & parse Azelis
     for (let row of azelisRows) {
       const codeVal = row['Azelis Code'] || '';
-      const derivedWt = splitData(codeVal);
-      row['Azelis Pack Weight'] = derivedWt;
+      row['Azelis Pack Weight'] = splitData(codeVal);
       row['Azelis Description'] = (row['Description'] || '').trim();
     }
 
-    // 2) Clean and parse Supplier data
+    // 2) Clean & parse Supplier
     for (let row of supplierRows) {
       row['Supplier Description'] = (row['Supplier Description'] || '').trim();
       row['Weight'] = floatify(row['Weight']);
     }
 
-    // 3) Clean logistic data
+    // 3) Clean logistic
     const cleanLogistic = logisticRows.filter(r =>
       (r['Logistic From'] !== '' && r['Logistic To'] !== '') ||
       r['Additional Charge'] !== ''
@@ -373,7 +331,7 @@
       'Additional Charge': floatify(r['Additional Charge']) || 0
     }));
 
-    // 4) Clean pack weight data
+    // 4) Clean pack weight
     const cleanPackWeight = packweightRows.filter(r =>
       (r['Pack From'] !== '' && r['Pack To'] !== '') ||
       r['Additional Charge'] !== ''
@@ -404,18 +362,20 @@
     }
 
     const finalRows = [];
-    const scoreThreshold = 30.0;  // same as your original code
+    // *** Key change: stricter threshold ***
+    const scoreThreshold = 80.0;  
 
     // For each Azelis desc group
     for (let [azDesc, azRows] of Object.entries(azelisGroups)) {
-      // Find all matching supplier descriptions above threshold
+      // Find all matching supplier desc above threshold
       let bestMatches = [];
       let bestScore = -1;
 
-      // Compare azDesc vs. each supplier desc
       for (let [supDesc, supRows] of Object.entries(supplierGroups)) {
-        // Only scoring desc, ignoring weights
         const [dScore] = calculateAllScores(azDesc, null, supDesc, null);
+        // Optionally log them to debug:
+        // console.log("Comparing:", azDesc, "vs", supDesc, "=> dScore:", dScore);
+
         if (dScore >= scoreThreshold) {
           bestMatches = bestMatches.concat(supRows);
           if (dScore > bestScore) {
@@ -425,7 +385,7 @@
       }
 
       if (bestMatches.length === 0) {
-        // No matching supplier group => push "No Match Found" for each Azelis row
+        // No match => "No Match Found"
         for (let azRow of azRows) {
           finalRows.push({
             'Azelis Code': azRow['Azelis Code'] || '',
@@ -447,32 +407,31 @@
         continue;
       }
 
-      // Group bestMatches by description+weight
+      // Group bestMatches by desc+weight
       const descWeightGroups = {};
       for (let supRow of bestMatches) {
         const supDesc = (supRow['Supplier Description'] || '').toLowerCase();
         const supWeight = floatify(supRow['Weight']);
-        const groupKey = `${supDesc}|${supWeight}`;
-        if (!descWeightGroups[groupKey]) {
-          descWeightGroups[groupKey] = [];
+        const key = `${supDesc}|${supWeight}`;
+        if (!descWeightGroups[key]) {
+          descWeightGroups[key] = [];
         }
-        descWeightGroups[groupKey].push(supRow);
+        descWeightGroups[key].push(supRow);
       }
 
-      // Process each Azelis row in the group
+      // Process each Azelis row in this group
       for (let azRow of azRows) {
         const azWeight = floatify(azRow['Azelis Pack Weight']);
-
-        // Find best match by closest weight & best desc
         let bestGroupKey = null;
         let bestWeightDiff = Infinity;
         let bestDescScore = -1;
 
+        // Look across all descWeightGroups
         for (let [groupKey, supRows] of Object.entries(descWeightGroups)) {
           const supRow = supRows[0];
           const supWt = floatify(supRow['Weight']);
           const supDesc = supRow['Supplier Description'];
-          
+
           const [dScore] = calculateAllScores(
             azRow['Azelis Description'],
             null,
@@ -482,8 +441,7 @@
 
           if (azWeight !== null && supWt !== null) {
             const weightDiff = Math.abs(azWeight - supWt);
-            // Prioritise weight match if description scores are close
-            // e.g. if dScore within 5 points of bestDescScore, compare weight
+            // Prioritise weight if desc scores are close
             if (dScore >= bestDescScore - 5) {
               if (weightDiff < bestWeightDiff) {
                 bestWeightDiff = weightDiff;
@@ -499,7 +457,7 @@
         }
 
         if (bestGroupKey) {
-          // Create entry for each "price break" row in that description+weight group
+          // For each price break row in that group
           for (let supRow of descWeightGroups[bestGroupKey]) {
             const supWeight = supRow['Weight'];
             const supDesc = supRow['Supplier Description'];
@@ -534,9 +492,8 @@
             // Apply pack weight surcharges
             lineObj = applyPackWeightSurcharges(lineObj, cleanPackWeight);
 
-            // Apply logistic surcharges => may produce multiple lines
+            // Apply logistic surcharges
             let linesAfterLogistics = applyLogisticSurcharges(lineObj, cleanLogistic);
-
             finalRows.push(...linesAfterLogistics);
           }
         } else {
@@ -565,9 +522,8 @@
   }
 
   /***************************************************************************
-   * 3) EditableTable + Main React App
+   * 4) EditableTable + Main React App
    ***************************************************************************/
-
 
   const Alert = ({ children }) => {
     return (
@@ -657,19 +613,19 @@
     );
   };
 
+  // Main App
   const MatchApp = () => {
     const [activeTab, setActiveTab] = React.useState('azelis');
     const [error, setError] = React.useState('');
     const [results, setResults] = React.useState([]);
 
-    // We want 4 tables: Azelis, Supplier, Logistic, PackWeight
-    const createRows = (cols, count=1000) => {
+    // We have 4 tables: azelis, supplier, logistic, packweight
+    const createRows = (cols, count=500) => {
       const emptyRow = {};
       cols.forEach(c => { emptyRow[c.key] = ''; });
       return Array.from({ length: count }, () => ({ ...emptyRow }));
     };
 
-    // Table definitions
     const tableDefs = {
       azelis: {
         columns: [
@@ -703,12 +659,11 @@
       }
     };
 
-    // Initialise data
     const [azelisData, setAzelisData] = React.useState(
-      createRows(tableDefs.azelis.columns, 500)
+      createRows(tableDefs.azelis.columns)
     );
     const [supplierData, setSupplierData] = React.useState(
-      createRows(tableDefs.supplier.columns, 500)
+      createRows(tableDefs.supplier.columns)
     );
     const [logisticData, setLogisticData] = React.useState(
       createRows(tableDefs.logistic.columns, 200)
@@ -717,7 +672,6 @@
       createRows(tableDefs.packweight.columns, 200)
     );
 
-    // Add row to the active table
     const addRow = () => {
       switch (activeTab) {
         case 'azelis':
@@ -735,25 +689,29 @@
       }
     };
 
-    // Helper for returning data+setter for the active tab
     const getActiveTable = () => {
       switch (activeTab) {
-        case 'azelis': return { data: azelisData, setData: setAzelisData, columns: tableDefs.azelis.columns };
-        case 'supplier': return { data: supplierData, setData: setSupplierData, columns: tableDefs.supplier.columns };
-        case 'logistic': return { data: logisticData, setData: setLogisticData, columns: tableDefs.logistic.columns };
-        case 'packweight': return { data: packweightData, setData: setPackweightData, columns: tableDefs.packweight.columns };
-        default: return { data: [], setData: () => {}, columns: [] };
+        case 'azelis':
+          return { data: azelisData, setData: setAzelisData, columns: tableDefs.azelis.columns };
+        case 'supplier':
+          return { data: supplierData, setData: setSupplierData, columns: tableDefs.supplier.columns };
+        case 'logistic':
+          return { data: logisticData, setData: setLogisticData, columns: tableDefs.logistic.columns };
+        case 'packweight':
+          return { data: packweightData, setData: setPackweightData, columns: tableDefs.packweight.columns };
+        default:
+          return { data: [], setData: () => {}, columns: [] };
       }
     };
 
-    // Filter out truly empty rows
+    // Filter out empty rows
     function cleanRows(rows, columns) {
       return rows.filter(r =>
         columns.some(col => String(r[col.key] || '').trim() !== '')
       );
     }
 
-    // PROCESS DATA
+    // Process Data
     const processData = () => {
       try {
         const azelisCols = tableDefs.azelis.columns;
@@ -780,7 +738,7 @@
       }
     };
 
-    // Export results to Excel
+    // Export
     const exportResults = () => {
       if (results.length === 0) return;
       const ws = XLSX.utils.json_to_sheet(results);
@@ -789,10 +747,10 @@
       XLSX.writeFile(wb, "match_results.xlsx");
     };
 
-    // Reset everything
+    // Reset all
     const resetAll = () => {
-      setAzelisData(createRows(tableDefs.azelis.columns, 500));
-      setSupplierData(createRows(tableDefs.supplier.columns, 500));
+      setAzelisData(createRows(tableDefs.azelis.columns));
+      setSupplierData(createRows(tableDefs.supplier.columns));
       setLogisticData(createRows(tableDefs.logistic.columns, 200));
       setPackweightData(createRows(tableDefs.packweight.columns, 200));
       setResults([]);
@@ -805,7 +763,7 @@
     return (
       <div className="max-w-full p-4">
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <h1 className="text-2xl font-bold mb-4">Match App (Best Matching Method)</h1>
+          <h1 className="text-2xl font-bold mb-4">Match App (Stricter Matching)</h1>
 
           <div className="flex gap-4 mb-4">
             <button
@@ -853,7 +811,7 @@
 
             <div className="mt-4">
               <div className="mb-2 text-sm text-gray-600">
-                Tip: Paste data directly from Excel. Select the cell where you want to start pasting.
+                Tip: Paste data directly from Excel. Select the cell in the table where you want to start.
               </div>
               <EditableTable
                 columns={currentTab.columns}
