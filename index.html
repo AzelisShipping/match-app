@@ -188,13 +188,24 @@
         // Toggle manual entry mode
         function toggleManualEntry() {
             manualMode = !manualMode;
-            document.getElementById('manualEntry').classList.toggle('hidden');
+            const manualEntryDiv = document.getElementById('manualEntry');
+            manualEntryDiv.classList.toggle('hidden');
             document.getElementById('modeToggle').textContent = 
                 manualMode ? 'Switch to File Upload' : 'Enter Data Manually';
             
-            if (manualMode && !tables.azelis) {
+            if (manualMode) {
+                // Always reinitialize tables when showing manual entry
                 initializeTables();
-                switchTab('azelis');
+                // Force the first tab to be active
+                const firstTab = document.querySelector('.tab-button');
+                if (firstTab) {
+                    firstTab.click();
+                }
+                // Make sure the first table is visible
+                const firstTableDiv = document.getElementById('azelisTable');
+                if (firstTableDiv) {
+                    firstTableDiv.classList.remove('hidden');
+                }
             }
         }
 
@@ -287,9 +298,12 @@
 
                 // Get best match
                 const bestMatch = matches[0];
-                const descScore = calculateDescriptionScore(azDesc, bestMatch['Supplier Description']);
-                const weightScore = calculateWeightScore(azPackWeight, bestMatch['Weight']);
-                const totalScore = (0.7 * descScore) + (0.3 * weightScore);
+                const scores = calculateAllScores(
+                    azDesc,
+                    azPackWeight,
+                    bestMatch['Supplier Description'],
+                    parseFloat(bestMatch['Weight'])
+                );
 
                 // Calculate surcharges
                 const priceWithSurcharges = calculateSurcharges(
@@ -307,26 +321,120 @@
                     'Matched Supplier SKU': bestMatch['SKU'],
                     'Matched Supplier Weight': bestMatch['Weight'],
                     'Matched Supplier Price': priceWithSurcharges,
-                    'Description Match Score': descScore.toFixed(2),
-                    'Weight Match Score': weightScore.toFixed(2),
-                    'Total Score': totalScore.toFixed(2)
+                    'Description Match Score': scores.descriptionScore,
+                    'Weight Match Score': scores.weightScore,
+                    'Total Score': scores.totalScore
                 };
             });
         }
 
-        // Calculate description match score
-        function calculateDescriptionScore(desc1, desc2) {
-            if (!desc1 || !desc2) return 0;
-            desc1 = desc1.toLowerCase().trim();
-            desc2 = desc2.toLowerCase().trim();
+        // Enhanced scoring logic
+        function calculateAllScores(azDesc, azPackWeight, supDesc, supWeight) {
+            let descScore = 0.0;
+            let wtScore = 0.0;
 
-            if (desc1 === desc2) return 100;
-            if (desc1.includes(desc2) || desc2.includes(desc1)) return 90;
+            // Clean text helper function
+            function cleanText(text) {
+                let cleaned = String(text).toLowerCase();
+                cleaned = cleaned.replace(/[®™©()[\],.;:'"]+/g, '');
+                cleaned = cleaned.trim().replace(/\s+/g, ' ');
+                return cleaned;
+            }
 
-            const words1 = new Set(desc1.split(/\s+/));
-            const words2 = new Set(desc2.split(/\s+/));
-            const intersection = new Set([...words1].filter(x => words2.has(x)));
-            return (intersection.size / Math.max(words1.size, words2.size)) * 80;
+            const azDescClean = cleanText(azDesc);
+            const supDescClean = cleanText(supDesc);
+            
+            // Remove spaces for exact matching
+            const azNoSpace = azDescClean.replace(/\s/g, '');
+            const supNoSpace = supDescClean.replace(/\s/g, '');
+
+            // Description Score
+            if (azDescClean && supDescClean) {
+                // Exact match (with or without spaces)
+                if (azDescClean === supDescClean || azNoSpace === supNoSpace) {
+                    descScore = 100.0;
+                }
+                // Partial match (with spaces)
+                else if (azDescClean.includes(supDescClean) || supDescClean.includes(azDescClean)) {
+                    descScore = 90.0;
+                }
+                // Partial match (without spaces)
+                else if (azNoSpace.includes(supNoSpace) || supNoSpace.includes(azNoSpace)) {
+                    descScore = 85.0;
+                }
+                else {
+                    // Word matching helper function
+                    function getWordScore(word1, word2) {
+                        if (word1 === word2) return 1.0;
+                        
+                        // Handle common suffixes
+                        const suffixes = ['s', 'se', 'sse', 'es'];
+                        for (const suffix of suffixes) {
+                            if (word1.endsWith(suffix)) {
+                                const base1 = word1.slice(0, -suffix.length);
+                                if (word2.startsWith(base1)) return 0.9;
+                            }
+                            if (word2.endsWith(suffix)) {
+                                const base2 = word2.slice(0, -suffix.length);
+                                if (word1.startsWith(base2)) return 0.9;
+                            }
+                        }
+                        
+                        // Handle partial matches
+                        const minLen = Math.min(word1.length, word2.length);
+                        if (minLen > 3) {
+                            if (word1.slice(0, minLen-1) === word2.slice(0, minLen-1)) return 0.8;
+                        }
+                        
+                        return 0.0;
+                    }
+
+                    // Split into words and compare
+                    const azWords = azDescClean.split(' ');
+                    const supWords = supDescClean.split(' ');
+                    
+                    let wordMatches = 0;
+                    const usedSupWords = new Set();
+                    
+                    for (const azWord of azWords) {
+                        let bestScore = 0;
+                        let bestMatch = null;
+                        
+                        for (const supWord of supWords) {
+                            if (!usedSupWords.has(supWord)) {
+                                const score = getWordScore(azWord, supWord);
+                                if (score > bestScore) {
+                                    bestScore = score;
+                                    bestMatch = supWord;
+                                }
+                            }
+                        }
+                        
+                        if (bestMatch && bestScore > 0) {
+                            wordMatches += bestScore;
+                            usedSupWords.add(bestMatch);
+                        }
+                    }
+                    
+                    const totalWords = Math.max(azWords.length, supWords.length);
+                    if (totalWords > 0) {
+                        descScore = (wordMatches / totalWords) * 80.0;
+                    }
+                }
+            }
+
+            // Weight Score
+            if (azPackWeight != null && supWeight != null) {
+                const diff = Math.abs(azPackWeight - supWeight);
+                wtScore = Math.max(0, 100 - diff);
+            }
+
+            const totalScore = 0.7 * descScore + 0.3 * wtScore;
+            return {
+                descriptionScore: Math.round(descScore * 100) / 100,
+                weightScore: Math.round(wtScore * 100) / 100,
+                totalScore: Math.round(totalScore * 100) / 100
+            };
         }
 
         // Calculate weight match score
