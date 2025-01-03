@@ -49,47 +49,112 @@
   }
 
   // The simpler description scoring used in your Python snippet
-  function calculateAllScores(azDesc, azPackWeight, supDesc, supWeight) {
+function calculateAllScores(azDesc, azPackWeight, supDesc, supWeight) {
     let descScore = 0;
     let wtScore = 0;
 
-    // Clean descriptions
+    // Clean descriptions and convert to lowercase
     const azDescClean = azDesc
       ? azDesc.toLowerCase().trim().replace(/\s+/g, ' ')
       : '';
     const supDescClean = supDesc
       ? supDesc.toLowerCase().trim().replace(/\s+/g, ' ')
       : '';
-    // Remove spaces for exact matching
-    const azNoSpace = azDescClean.replace(/\s+/g, '');
-    const supNoSpace = supDescClean.replace(/\s+/g, '');
+
+    // Create abbreviation by taking first letter of each word
+    const getAbbreviation = (str) => {
+      return str.split(/\s+/).map(word => word[0]).join('');
+    };
+
+    // Create potential variations of the description
+    const getVariations = (desc) => {
+      const variations = new Set();
+      // Original cleaned description
+      variations.add(desc);
+      // No spaces
+      variations.add(desc.replace(/\s+/g, ''));
+      // Abbreviation
+      variations.add(getAbbreviation(desc));
+      
+      // Handle parentheses content
+      if (desc.includes('(') && desc.includes(')')) {
+        // Version without parentheses content
+        const withoutParens = desc.replace(/\s*\([^)]*\)/g, '').trim();
+        variations.add(withoutParens);
+        variations.add(withoutParens.replace(/\s+/g, ''));
+        variations.add(getAbbreviation(withoutParens));
+        
+        // Just the parentheses content
+        const parensContent = desc.match(/\(([^)]+)\)/g);
+        if (parensContent) {
+          parensContent.forEach(p => {
+            const content = p.replace(/[()]/g, '').trim();
+            variations.add(content);
+            variations.add(content.replace(/\s+/g, ''));
+            variations.add(getAbbreviation(content));
+          });
+        }
+      }
+      
+      return variations;
+    };
+
+    // Get all variations for both descriptions
+    const azVariations = getVariations(azDescClean);
+    const supVariations = getVariations(supDescClean);
 
     // Description Score
     if (azDescClean && supDescClean) {
-      // Exact match
-      if (azDescClean === supDescClean || azNoSpace === supNoSpace) {
-        descScore = 100;
+      // Check for exact matches among variations
+      for (const azVar of azVariations) {
+        for (const supVar of supVariations) {
+          if (azVar === supVar) {
+            descScore = 100;
+            break;
+          }
+        }
+        if (descScore === 100) break;
       }
-      // Partial match (with spaces)
-      else if (
-        azDescClean.includes(supDescClean) ||
-        supDescClean.includes(azDescClean)
-      ) {
-        descScore = 90;
-      }
-      // Partial match (without spaces)
-      else if (
-        azNoSpace.includes(supNoSpace) ||
-        supNoSpace.includes(azNoSpace)
-      ) {
-        descScore = 85;
-      } else {
-        // Word-based fallback
-        const azWords = new Set(azDescClean.split(' '));
-        const supWords = new Set(supDescClean.split(' '));
-        const common = [...azWords].filter(x => supWords.has(x));
-        const totalWords = Math.max(azWords.size, supWords.size);
-        descScore = (common.length / totalWords) * 80.0;
+
+      // If no exact match, check for partial matches
+      if (descScore < 100) {
+        // Check if any variation is contained within another
+        let bestPartialScore = 0;
+        for (const azVar of azVariations) {
+          for (const supVar of supVariations) {
+            if (azVar.includes(supVar) || supVar.includes(azVar)) {
+              bestPartialScore = Math.max(bestPartialScore, 90);
+            }
+          }
+        }
+        
+        if (bestPartialScore > 0) {
+          descScore = bestPartialScore;
+        } else {
+          // Word-based scoring as fallback
+          const azWords = new Set(azDescClean.split(' '));
+          const supWords = new Set(supDescClean.split(' '));
+          const common = [...azWords].filter(x => supWords.has(x));
+          const totalWords = Math.max(azWords.size, supWords.size);
+          
+          // Calculate word match ratio
+          const wordMatchRatio = common.length / totalWords;
+          
+          // Check if abbreviations of remaining words match
+          const azRemaining = [...azWords].filter(x => !supWords.has(x));
+          const supRemaining = [...supWords].filter(x => !azWords.has(x));
+          const azRemainingAbbr = azRemaining.map(w => w[0]).join('');
+          const supRemainingAbbr = supRemaining.map(w => w[0]).join('');
+          
+          let abbrBonus = 0;
+          if (azRemainingAbbr && supRemainingAbbr) {
+            if (azRemainingAbbr === supRemainingAbbr) {
+              abbrBonus = 0.3; // 30% bonus for matching abbreviations
+            }
+          }
+          
+          descScore = Math.min(85, (wordMatchRatio + abbrBonus) * 80.0);
+        }
       }
     }
 
@@ -108,7 +173,7 @@
       parseFloat(wtScore.toFixed(2)),
       parseFloat(totalScore.toFixed(2))
     ];
-  }
+}
 
   // Surcharge 1: Pack Weight
   function applyPackWeightSurcharges(lineObj, packweightRows) {
