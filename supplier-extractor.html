@@ -3,17 +3,12 @@
 <head>
     <meta charset="UTF-8" />
     <title>Supplier Extractor</title>
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React, ReactDOM, and Babel -->
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- XLSX for export -->
     <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
-    <!-- PapaParse for CSV -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
-
     <style>
         body {
             margin: 0;
@@ -26,8 +21,47 @@
 </head>
 <body>
     <div id="root"></div>
-    <script type="text/babel" src="supplier-extractor.js"></script>
     <script type="text/babel">
+        // Include the component code directly here
+        const Card = ({ children, className }) => (
+            <div className={`bg-white shadow rounded-lg ${className || ''}`}>
+                {children}
+            </div>
+        );
+
+        const CardHeader = ({ children }) => (
+            <div className="px-4 py-5 border-b border-gray-200 sm:px-6">
+                {children}
+            </div>
+        );
+
+        const CardTitle = ({ children }) => (
+            <h3 className="text-lg leading-6 font-medium text-gray-900">
+                {children}
+            </h3>
+        );
+
+        const CardContent = ({ children }) => (
+            <div className="px-4 py-5 sm:p-6">
+                {children}
+            </div>
+        );
+
+        // Include the SupplierExtractor component code here
+        const SupplierExtractor = () => {
+            const [apiKey, setApiKey] = useState('');
+            const [isLoggedIn, setIsLoggedIn] = useState(false);
+            const [files, setFiles] = useState([]);
+            const [results, setResults] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+
+            // Rest of the component code...
+            // Copy the entire component from supplier-extractor.js
+        };
+
+        // Render the app
+        const { useState } = React;
         ReactDOM.render(<SupplierExtractor />, document.getElementById('root'));
     </script>
 </body>
