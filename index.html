@@ -136,14 +136,39 @@
         // Initialize tables
         function initializeTables() {
             Object.entries(tableDefinitions).forEach(([key, def]) => {
-                tables[key] = new Tabulator(`#${key}Table`, {
-                    height: 400,
-                    layout: "fitColumns",
-                    columns: def.columns,
-                    placeholder: def.placeholder,
-                    data: [],
-                    addRowPos: "bottom",
-                });
+                // First ensure the table div exists
+                const tableDiv = document.getElementById(`${key}Table`);
+                if (!tableDiv) {
+                    console.error(`Table div #${key}Table not found`);
+                    return;
+                }
+
+                // Clear any existing table
+                if (tables[key]) {
+                    tables[key].destroy();
+                }
+
+                // Initialize new table
+                try {
+                    tables[key] = new Tabulator(`#${key}Table`, {
+                        height: 400,
+                        layout: "fitColumns",
+                        columns: def.columns,
+                        placeholder: def.placeholder,
+                        data: [],
+                        addRowPos: "bottom",
+                        history: true,
+                    });
+                    
+                    // Add a row button for each table
+                    const addButton = document.createElement('button');
+                    addButton.textContent = 'Add Row';
+                    addButton.className = 'px-3 py-1 bg-green-500 text-white rounded mt-2 mb-4';
+                    addButton.onclick = () => tables[key].addRow({});
+                    tableDiv.parentNode.insertBefore(addButton, tableDiv);
+                } catch (error) {
+                    console.error(`Error initializing ${key} table:`, error);
+                }
             });
         }
 
