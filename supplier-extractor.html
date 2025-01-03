@@ -138,11 +138,21 @@
 
                 if (!response.ok) throw new Error(`API error: ${response.status}`);
 
-                const data = await response.json();
+               const data = await response.json();
+            try {
+                const content = data.choices[0].message.content;
+                // Remove any non-JSON text that might precede the actual JSON
+                const jsonStart = content.indexOf('{');
+                const jsonEnd = content.lastIndexOf('}') + 1;
+                const jsonStr = content.slice(jsonStart, jsonEnd);
+                const parsed = JSON.parse(jsonStr);
                 return {
                     filename,
-                    ...JSON.parse(data.choices[0].message.content)
+                    ...parsed
                 };
+            } catch (err) {
+                throw new Error(`Failed to parse GPT response: ${data.choices[0].message.content}`);
+            }
             };
 
             const processFiles = async () => {
