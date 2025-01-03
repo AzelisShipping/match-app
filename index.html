@@ -383,41 +383,52 @@
         descWeightGroups[groupKey].push(supRow);
       }
 
-      // Now do the row-level matching
-      for (let azRow of azRows) {
-        const azWeight = floatify(azRow['Azelis Pack Weight']);
-        let bestGroupKey = null;
-        let bestWeightDiff = Infinity;
-        let bestDescScore = -1;
+// Now do the row-level matching
+for (let azRow of azRows) {
+  const azWeight = floatify(azRow['Azelis Pack Weight']);
+  let bestGroupKey = null;
+  let bestWeightDiff = Infinity;
+  let bestDescScore = -1;
 
-        for (let [groupKey, supRows] of Object.entries(descWeightGroups)) {
-          const supRow = supRows[0];
-          const supWt = floatify(supRow['Weight']);
-          const supDesc = supRow['Supplier Description'];
+  for (let [groupKey, supRows] of Object.entries(descWeightGroups)) {
+    const supRow = supRows[0];
+    const supWt = floatify(supRow['Weight']);
+    const supDesc = supRow['Supplier Description'];
 
-          const [dScore] = calculateAllScores(
-            azRow['Azelis Description'],
-            null,
-            supDesc,
-            null
-          );
+    const [dScore] = calculateAllScores(
+      azRow['Azelis Description'],
+      null,
+      supDesc,
+      null
+    );
 
-          if (azWeight !== null && supWt !== null) {
-            const weightDiff = Math.abs(azWeight - supWt);
-            // If desc is close (within 5 points), prefer smaller weightDiff
-            if (dScore >= bestDescScore - 5) {
-              if (weightDiff < bestWeightDiff) {
-                bestWeightDiff = weightDiff;
-                bestGroupKey = groupKey;
-                bestDescScore = dScore;
-              }
-            } else if (dScore > bestDescScore) {
-              bestWeightDiff = weightDiff;
-              bestGroupKey = groupKey;
-              bestDescScore = dScore;
-            }
-          }
-        }
+    if (azWeight !== null && supWt !== null) {
+      const weightDiff = Math.abs(azWeight - supWt);
+      
+      // First priority: Exact description match (score = 100)
+      if (dScore === 100 && (bestDescScore !== 100 || weightDiff < bestWeightDiff)) {
+        bestWeightDiff = weightDiff;
+        bestGroupKey = groupKey;
+        bestDescScore = dScore;
+      }
+      // Second priority: Better description score
+      else if (dScore > bestDescScore) {
+        bestWeightDiff = weightDiff;
+        bestGroupKey = groupKey;
+        bestDescScore = dScore;
+      }
+      // Third priority: Same description score but better weight match
+      else if (dScore === bestDescScore && weightDiff < bestWeightDiff) {
+        bestWeightDiff = weightDiff;
+        bestGroupKey = groupKey;
+        bestDescScore = dScore;
+      }
+    } else if (dScore > bestDescScore) {
+      // Handle cases where weights are null
+      bestGroupKey = groupKey;
+      bestDescScore = dScore;
+    }
+  }
 
         if (bestGroupKey) {
           for (let supRow of descWeightGroups[bestGroupKey]) {
