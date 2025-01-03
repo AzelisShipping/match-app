@@ -2,16 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Match App (Stricter Matching)</title>
+  <title>Match App with Editable Threshold</title>
   <!-- Tailwind CSS from CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- React, ReactDOM, and Babel from CDN -->
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <!-- XLSX from CDN (optional if you want to export results) -->
+  <!-- XLSX for export -->
   <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
-  
+
   <style>
     body {
       margin: 0;
@@ -37,10 +37,9 @@
     return isNaN(num) ? null : num;
   }
 
-  // Example: If "Azelis Code" includes "123KG", parse out "123" as a number
+  // Example: If "Azelis Code" includes "123KG", parse out "123"
   function splitData(s) {
     const str = String(s);
-    // Look for any digits that come before "KG"
     const match = str.match(/(\d+)(?=KG)/i);
     if (match) {
       return parseFloat(match[1]);
@@ -48,30 +47,22 @@
     return null;
   }
 
-  /**
-   * Jaro–Winkler Distance
-   * Returns a similarity from 0..1 (1 = identical).
-   */
+  // Jaro–Winkler distance (0..1)
   function jaroWinkler(str1, str2) {
     const s1 = str1.toLowerCase().trim();
     const s2 = str2.toLowerCase().trim();
-
     if (s1 === s2) return 1.0;
 
-    // Matching window
     const matchDist = Math.floor(Math.max(s1.length, s2.length) / 2) - 1;
-
     const s1Matches = new Array(s1.length).fill(false);
     const s2Matches = new Array(s2.length).fill(false);
 
     let matches = 0;
     let transpositions = 0;
 
-    // Find matches
     for (let i = 0; i < s1.length; i++) {
       const start = Math.max(0, i - matchDist);
       const end = Math.min(s2.length - 1, i + matchDist);
-
       for (let j = start; j <= end; j++) {
         if (!s2Matches[j] && s1[i] === s2[j]) {
           s1Matches[i] = true;
@@ -84,7 +75,6 @@
 
     if (!matches) return 0.0;
 
-    // Count transpositions
     let k = 0;
     for (let i = 0; i < s1.length; i++) {
       if (s1Matches[i]) {
@@ -98,7 +88,7 @@
     const m = matches;
     const jaro = (m / s1.length + m / s2.length + (m - transpositions) / m) / 3.0;
 
-    // Jaro–Winkler: add prefix scale
+    // Winkler prefix
     let prefix = 0;
     for (let i = 0; i < Math.min(s1.length, s2.length, 4); i++) {
       if (s1[i] === s2[i]) prefix++;
@@ -108,58 +98,45 @@
     return jaro + prefix * p * (1 - jaro);
   }
 
-  /**
-   * Remove special characters but keep letters, digits, and spaces.
-   * Collapses multiple spaces to one.
-   */
   function cleanString(str) {
     if (!str) return '';
     return str
       .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, '')
+      .replace(/[^a-z0-9\s]/g, '')  // keep letters/digits/spaces
       .replace(/\s+/g, ' ')
       .trim();
   }
 
-  /**
-   * Fallback for partial overlap if Jaro–Winkler isn’t near 0 or 1.
-   */
+  // Fallback for partial word overlap + abbreviation
   function fallbackWordAbbrevScore(azDescClean, supDescClean, jwSimilarityPct) {
-    // Tokenise
     const azTokens = azDescClean.split(' ');
     const supTokens = supDescClean.split(' ');
 
-    // Word-level overlap
     const azSet = new Set(azTokens);
     const supSet = new Set(supTokens);
     const commonWords = [...azSet].filter(x => supSet.has(x));
     const maxSize = Math.max(azSet.size, supSet.size) || 1;
-    const wordRatio = commonWords.length / maxSize; // 0..1
+    const wordRatio = commonWords.length / maxSize;
 
-    // Abbreviation
     const abbr = (tokens) => tokens.map(t => t[0]).join('');
     const azAbbr = abbr(azTokens);
     const supAbbr = abbr(supTokens);
     let abbrBonus = 0;
     if (azAbbr && supAbbr && azAbbr === supAbbr) {
-      abbrBonus = 10; // small bonus
+      abbrBonus = 10;
     }
 
-    // Combine:
-    //  - Jaro–Winkler (0..100) as baseline
-    //  - Word Overlap * 30
-    //  - abbrBonus up to 10
+    // Weighted combination
     const fallbackScore = jwSimilarityPct * 0.6 + wordRatio * 30 + abbrBonus;
-    // Cap at 99
     return fallbackScore > 99 ? 99 : fallbackScore;
   }
 
   /**
-   * Stricter version of `calculateAllScores`:
-   *   - If Jaro–Winkler < 0.50 => descScore=0
-   *   - If >= 0.98 => descScore=100
-   *   - Else => fallback
-   *   - Then combine with weightScore
+   * This is the main function used for scoring. 
+   * We'll keep the "stricter logic" approach:
+   *   - If JW < 0.50 => descScore=0
+   *   - If JW >= 0.98 => descScore=100
+   *   - Otherwise => fallback partial
    */
   function calculateAllScores(azDesc, azWeight, supDesc, supWeight) {
     const azClean = cleanString(azDesc);
@@ -168,24 +145,19 @@
       return [0, 0, 0];
     }
 
-    // Jaro–Winkler 0..1
     const jwVal = jaroWinkler(azClean, supClean);
     let descScore;
-
     if (jwVal >= 0.98) {
-      descScore = 100; // near perfect
+      descScore = 100;
     } else if (jwVal < 0.50) {
-      descScore = 0; // too different
+      descScore = 0;
     } else {
-      // fallback approach
       const fallback = fallbackWordAbbrevScore(azClean, supClean, jwVal * 100);
       descScore = Math.min(99, fallback);
     }
 
-    // Weight
     const wScore = weightScore(azWeight, supWeight);
 
-    // Combine
     const total = 0.7 * descScore + 0.3 * wScore;
     return [
       parseFloat(descScore.toFixed(2)),
@@ -194,32 +166,20 @@
     ];
   }
 
-  /**
-   * Weight difference => 100 if identical, degrade with difference.
-   */
+  // Weight difference => degrade with difference
   function weightScore(azWeight, supWeight) {
     const azNum = floatify(azWeight);
     const supNum = floatify(supWeight);
     if (azNum === null || supNum === null) return 0;
 
     const diff = Math.abs(azNum - supNum);
-    if (diff < 0.00001) {
-      return 100;
-    } else if (diff <= 0.1) {
-      return 95;
-    } else if (diff <= 0.5) {
-      return 85;
-    } else {
-      // degrade further (arbitrary logic)
-      return Math.max(0, 85 - (diff - 0.5) * 2);
-    }
+    if (diff < 0.00001) return 100;
+    else if (diff <= 0.1) return 95;
+    else if (diff <= 0.5) return 85;
+    return Math.max(0, 85 - (diff - 0.5) * 2);
   }
 
-  /***************************************************************************
-   * 2) Surcharges
-   ***************************************************************************/
-
-  // Pack Weight Surcharge
+  // Surcharge 1: Pack Weight
   function applyPackWeightSurcharges(lineObj, packweightRows) {
     if (!packweightRows || packweightRows.length === 0) {
       return lineObj;
@@ -234,7 +194,6 @@
       const pwTo = floatify(row['Pack To']);
       const addVal = floatify(row['Additional Charge']) || 0;
 
-      // null => Infinity
       const fromVal = pwFrom === null ? -Infinity : pwFrom;
       const toVal = pwTo === null ? Infinity : pwTo;
 
@@ -250,7 +209,7 @@
     return lineObj;
   }
 
-  // Logistic Surcharge
+  // Surcharge 2: Logistic
   function applyLogisticSurcharges(lineObj, logisticRows) {
     if (!logisticRows || logisticRows.length === 0) {
       return [lineObj];
@@ -275,12 +234,10 @@
       if (lFrom === null) lFrom = -Infinity;
       if (lTo === null) lTo = Infinity;
 
-      // EXACT match => add to the main line
       if (lFrom === supFrom && lTo === supTo) {
         basePrice += addVal;
         logisticSum += addVal;
       } else {
-        // Extra line
         const newLine = { ...mainLine };
         let newPrice = floatify(newLine['Matched Supplier Price']) || 0;
         newPrice += addVal;
@@ -304,10 +261,20 @@
   }
 
   /***************************************************************************
-   * 3) Core “Process DataFrames” Logic (with stricter threshold)
+   * 2) Core “Process DataFrames” Logic
    ***************************************************************************/
 
-  function processDataframes(azelisRows, supplierRows, logisticRows, packweightRows) {
+  /**
+   * Now we accept a dynamic descThreshold. We'll compare dScore >= descThreshold
+   * to decide if the supplier group is "good enough."
+   */
+  function processDataframes(
+    azelisRows,
+    supplierRows,
+    logisticRows,
+    packweightRows,
+    descThreshold
+  ) {
     // 1) Clean & parse Azelis
     for (let row of azelisRows) {
       const codeVal = row['Azelis Code'] || '';
@@ -362,20 +329,17 @@
     }
 
     const finalRows = [];
-    // *** Key change: stricter threshold ***
-    const scoreThreshold = 80.0;  
+
+    // We'll now rely on the user's descThreshold from the UI
+    const scoreThreshold = descThreshold || 80; // fallback if blank
 
     // For each Azelis desc group
     for (let [azDesc, azRows] of Object.entries(azelisGroups)) {
-      // Find all matching supplier desc above threshold
       let bestMatches = [];
       let bestScore = -1;
 
       for (let [supDesc, supRows] of Object.entries(supplierGroups)) {
         const [dScore] = calculateAllScores(azDesc, null, supDesc, null);
-        // Optionally log them to debug:
-        // console.log("Comparing:", azDesc, "vs", supDesc, "=> dScore:", dScore);
-
         if (dScore >= scoreThreshold) {
           bestMatches = bestMatches.concat(supRows);
           if (dScore > bestScore) {
@@ -385,7 +349,7 @@
       }
 
       if (bestMatches.length === 0) {
-        // No match => "No Match Found"
+        // "No Match Found"
         for (let azRow of azRows) {
           finalRows.push({
             'Azelis Code': azRow['Azelis Code'] || '',
@@ -407,26 +371,25 @@
         continue;
       }
 
-      // Group bestMatches by desc+weight
+      // Group by desc+weight
       const descWeightGroups = {};
       for (let supRow of bestMatches) {
         const supDesc = (supRow['Supplier Description'] || '').toLowerCase();
         const supWeight = floatify(supRow['Weight']);
-        const key = `${supDesc}|${supWeight}`;
-        if (!descWeightGroups[key]) {
-          descWeightGroups[key] = [];
+        const groupKey = `${supDesc}|${supWeight}`;
+        if (!descWeightGroups[groupKey]) {
+          descWeightGroups[groupKey] = [];
         }
-        descWeightGroups[key].push(supRow);
+        descWeightGroups[groupKey].push(supRow);
       }
 
-      // Process each Azelis row in this group
+      // Now do the row-level matching
       for (let azRow of azRows) {
         const azWeight = floatify(azRow['Azelis Pack Weight']);
         let bestGroupKey = null;
         let bestWeightDiff = Infinity;
         let bestDescScore = -1;
 
-        // Look across all descWeightGroups
         for (let [groupKey, supRows] of Object.entries(descWeightGroups)) {
           const supRow = supRows[0];
           const supWt = floatify(supRow['Weight']);
@@ -441,7 +404,7 @@
 
           if (azWeight !== null && supWt !== null) {
             const weightDiff = Math.abs(azWeight - supWt);
-            // Prioritise weight if desc scores are close
+            // If desc is close (within 5 points), prefer smaller weightDiff
             if (dScore >= bestDescScore - 5) {
               if (weightDiff < bestWeightDiff) {
                 bestWeightDiff = weightDiff;
@@ -457,7 +420,6 @@
         }
 
         if (bestGroupKey) {
-          // For each price break row in that group
           for (let supRow of descWeightGroups[bestGroupKey]) {
             const supWeight = supRow['Weight'];
             const supDesc = supRow['Supplier Description'];
@@ -489,15 +451,14 @@
               'Total Score': tScore
             };
 
-            // Apply pack weight surcharges
+            // pack weight surcharges
             lineObj = applyPackWeightSurcharges(lineObj, cleanPackWeight);
 
-            // Apply logistic surcharges
+            // logistic surcharges
             let linesAfterLogistics = applyLogisticSurcharges(lineObj, cleanLogistic);
             finalRows.push(...linesAfterLogistics);
           }
         } else {
-          // No weight match found
           finalRows.push({
             'Azelis Code': azRow['Azelis Code'] || '',
             'Azelis Description': azRow['Azelis Description'] || '',
@@ -522,7 +483,7 @@
   }
 
   /***************************************************************************
-   * 4) EditableTable + Main React App
+   * 3) EditableTable + Main React App
    ***************************************************************************/
 
   const Alert = ({ children }) => {
@@ -533,7 +494,6 @@
     );
   };
 
-  // Table for entering data
   const EditableTable = ({ columns, data, setData }) => {
     const handlePaste = (e, rowIndex, colIndex) => {
       e.preventDefault();
@@ -548,12 +508,10 @@
         pastedData.forEach((rowVals, i) => {
           const targetRow = rowIndex + i;
           while (newData.length <= targetRow) {
-            // add empty row
             const emptyRow = {};
             columns.forEach(col => (emptyRow[col.key] = ''));
             newData.push(emptyRow);
           }
-
           rowVals.forEach((cell, j) => {
             const colKey = columns[colIndex + j]?.key;
             if (colKey) {
@@ -613,13 +571,15 @@
     );
   };
 
-  // Main App
   const MatchApp = () => {
     const [activeTab, setActiveTab] = React.useState('azelis');
     const [error, setError] = React.useState('');
     const [results, setResults] = React.useState([]);
 
-    // We have 4 tables: azelis, supplier, logistic, packweight
+    // 1) We store a user‐editable threshold for description:
+    const [descThreshold, setDescThreshold] = React.useState(80);
+
+    // We have 4 tables
     const createRows = (cols, count=500) => {
       const emptyRow = {};
       cols.forEach(c => { emptyRow[c.key] = ''; });
@@ -659,18 +619,10 @@
       }
     };
 
-    const [azelisData, setAzelisData] = React.useState(
-      createRows(tableDefs.azelis.columns)
-    );
-    const [supplierData, setSupplierData] = React.useState(
-      createRows(tableDefs.supplier.columns)
-    );
-    const [logisticData, setLogisticData] = React.useState(
-      createRows(tableDefs.logistic.columns, 200)
-    );
-    const [packweightData, setPackweightData] = React.useState(
-      createRows(tableDefs.packweight.columns, 200)
-    );
+    const [azelisData, setAzelisData] = React.useState(createRows(tableDefs.azelis.columns));
+    const [supplierData, setSupplierData] = React.useState(createRows(tableDefs.supplier.columns));
+    const [logisticData, setLogisticData] = React.useState(createRows(tableDefs.logistic.columns, 200));
+    const [packweightData, setPackweightData] = React.useState(createRows(tableDefs.packweight.columns, 200));
 
     const addRow = () => {
       switch (activeTab) {
@@ -691,27 +643,20 @@
 
     const getActiveTable = () => {
       switch (activeTab) {
-        case 'azelis':
-          return { data: azelisData, setData: setAzelisData, columns: tableDefs.azelis.columns };
-        case 'supplier':
-          return { data: supplierData, setData: setSupplierData, columns: tableDefs.supplier.columns };
-        case 'logistic':
-          return { data: logisticData, setData: setLogisticData, columns: tableDefs.logistic.columns };
-        case 'packweight':
-          return { data: packweightData, setData: setPackweightData, columns: tableDefs.packweight.columns };
-        default:
-          return { data: [], setData: () => {}, columns: [] };
+        case 'azelis': return { data: azelisData, setData: setAzelisData, columns: tableDefs.azelis.columns };
+        case 'supplier': return { data: supplierData, setData: setSupplierData, columns: tableDefs.supplier.columns };
+        case 'logistic': return { data: logisticData, setData: setLogisticData, columns: tableDefs.logistic.columns };
+        case 'packweight': return { data: packweightData, setData: setPackweightData, columns: tableDefs.packweight.columns };
+        default: return { data: [], setData: () => {}, columns: [] };
       }
     };
 
-    // Filter out empty rows
     function cleanRows(rows, columns) {
       return rows.filter(r =>
         columns.some(col => String(r[col.key] || '').trim() !== '')
       );
     }
 
-    // Process Data
     const processData = () => {
       try {
         const azelisCols = tableDefs.azelis.columns;
@@ -724,11 +669,15 @@
         const cleanLogistic = cleanRows(logisticData, logisticCols);
         const cleanPackweight = cleanRows(packweightData, packweightCols);
 
+        // parse the threshold from user input
+        const thresholdVal = parseFloat(descThreshold) || 80;
+
         const finalRows = processDataframes(
           cleanAzelis,
           cleanSupplier,
           cleanLogistic,
-          cleanPackweight
+          cleanPackweight,
+          thresholdVal
         );
 
         setResults(finalRows);
@@ -738,7 +687,6 @@
       }
     };
 
-    // Export
     const exportResults = () => {
       if (results.length === 0) return;
       const ws = XLSX.utils.json_to_sheet(results);
@@ -747,7 +695,6 @@
       XLSX.writeFile(wb, "match_results.xlsx");
     };
 
-    // Reset all
     const resetAll = () => {
       setAzelisData(createRows(tableDefs.azelis.columns));
       setSupplierData(createRows(tableDefs.supplier.columns));
@@ -757,13 +704,31 @@
       setError('');
     };
 
-    // Render
     const currentTab = getActiveTable();
 
     return (
       <div className="max-w-full p-4">
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <h1 className="text-2xl font-bold mb-4">Match App (Stricter Matching)</h1>
+          <h1 className="text-2xl font-bold mb-4">Match App (Editable Threshold)</h1>
+
+          <div className="mb-4">
+            <label htmlFor="descThreshold" className="mr-2 font-semibold">
+              Description Score Threshold:
+            </label>
+            <input
+              id="descThreshold"
+              type="number"
+              step="1"
+              min="0"
+              max="100"
+              className="border px-2 py-1 w-20"
+              value={descThreshold}
+              onChange={(e) => setDescThreshold(e.target.value)}
+            />
+            <span className="ml-2 text-sm text-gray-600">
+              (Default 80. Raise for stricter matching, lower for more lenient.)
+            </span>
+          </div>
 
           <div className="flex gap-4 mb-4">
             <button
@@ -775,7 +740,7 @@
             <button
               onClick={exportResults}
               disabled={results.length === 0}
-              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 
+              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700
                         disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Export Results
@@ -868,7 +833,6 @@
     );
   };
 
-  // Render
   ReactDOM.render(<MatchApp />, document.getElementById('root'));
   </script>
 </body>
