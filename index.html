@@ -762,8 +762,14 @@ for (let azRow of azRows) {
             >
               Reset
             </button>
-          </div>
-
+        <button
+            onClick={() => window.location.href = 'supplier-extractor.js'}
+            className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
+          >
+            Extract Supplier Data
+          </button>
+        </div>
+         
           {error && <Alert>{error}</Alert>}
 
           <div className="mb-4">
