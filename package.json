@@ -1,0 +1,7 @@
+{
+  "name": "match-app",
+  "version": "1.0.0",
+  "dependencies": {
+    "@aws-sdk/client-textract": "^3.0.0"
+  }
+}
