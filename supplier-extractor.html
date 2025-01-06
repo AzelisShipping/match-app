@@ -64,7 +64,6 @@
                                 }
 
                                 const data = await response.json();
-                                // Process Textract response into table data
                                 const tableData = extractTableData(data);
                                 resolve(tableData);
                             } catch (error) {
@@ -80,9 +79,66 @@
             };
 
             const extractTableData = (textractResponse) => {
-                // Process Textract blocks into structured data
+                if (!textractResponse.Blocks) {
+                    return [];
+                }
+
+                const tables = textractResponse.Blocks.filter(block => block.BlockType === 'TABLE');
+                if (tables.length === 0) {
+                    return [];
+                }
+
+                const cellsById = {};
                 const tableData = [];
-                // Add processing logic here based on Textract response format
+
+                textractResponse.Blocks.forEach(block => {
+                    if (block.BlockType === 'CELL') {
+                        cellsById[block.Id] = block;
+                    }
+                });
+
+                tables.forEach(table => {
+                    const rows = {};
+                    let headers = [];
+
+                    table.Relationships.forEach(rel => {
+                        if (rel.Type === 'CHILD') {
+                            rel.Ids.forEach(cellId => {
+                                const cell = cellsById[cellId];
+                                if (!cell) return;
+
+                                const rowIndex = cell.RowIndex;
+                                const colIndex = cell.ColumnIndex;
+
+                                if (!rows[rowIndex]) {
+                                    rows[rowIndex] = {};
+                                }
+
+                                const cellText = cell.Relationships?.[0]?.Ids
+                                    .map(textId => {
+                                        const textBlock = textractResponse.Blocks.find(b => b.Id === textId);
+                                        return textBlock?.Text || '';
+                                    })
+                                    .join(' ') || '';
+
+                                if (rowIndex === 1) {
+                                    headers[colIndex - 1] = cellText;
+                                } else {
+                                    if (headers[colIndex - 1]) {
+                                        rows[rowIndex][headers[colIndex - 1]] = cellText;
+                                    }
+                                }
+                            });
+                        }
+                    });
+
+                    Object.values(rows).forEach(row => {
+                        if (Object.keys(row).length > 0) {
+                            tableData.push(row);
+                        }
+                    });
+                });
+
                 return tableData;
             };
 
@@ -98,7 +154,7 @@
                         } else if (file.type.includes('image') || file.name.match(/\.(jpg|jpeg|png|tiff|pdf)$/i)) {
                             fileResults = await processImage(file);
                         } else {
-                            continue; // Skip unsupported file types
+                            continue;
                         }
                         
                         allResults.push(...(Array.isArray(fileResults) ? fileResults : []).map(r => ({
