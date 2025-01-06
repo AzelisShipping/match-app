@@ -23,38 +23,25 @@
                 setFiles(Array.from(event.target.files));
                 setError('');
             };
+
             const processFile = async (file) => {
                 try {
-                    if (file.name.toLowerCase().endsWith('.pdf')) {
-                        const formData = new FormData();
-                        formData.append('file', file);
-                        
-                        const response = await fetch('/api/process', {
-                            method: 'POST',
-                            body: formData
-                        });
-                        
-                        const result = await response.json();
-                        return result;
-                    } else {
-                        const reader = new FileReader();
-                        return new Promise((resolve, reject) => {
-                            reader.onload = (e) => {
-                                const data = new Uint8Array(e.target.result);
-                                const workbook = XLSX.read(data, { type: 'array' });
-                                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-                                const jsonData = XLSX.utils.sheet_to_json(firstSheet);
-                                resolve(jsonData);
-                            };
-                            reader.onerror = reject;
-                            reader.readAsArrayBuffer(file);
-                        });
-                    }
+                    const reader = new FileReader();
+                    return new Promise((resolve, reject) => {
+                        reader.onload = (e) => {
+                            const data = new Uint8Array(e.target.result);
+                            const workbook = XLSX.read(data, { type: 'array' });
+                            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                            const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+                            resolve(jsonData);
+                        };
+                        reader.onerror = reject;
+                        reader.readAsArrayBuffer(file);
+                    });
                 } catch (err) {
                     throw new Error(`Error processing ${file.name}: ${err.message}`);
                 }
             };
-
 
             const processFiles = async () => {
                 setLoading(true);
@@ -99,12 +86,12 @@
                         <div className="space-y-6">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Upload Files (PDF/Excel)
+                                    Upload Files (Excel)
                                 </label>
                                 <input
                                     type="file"
                                     multiple
-                                    accept=".pdf,.xlsx,.xls"
+                                    accept=".xlsx,.xls"
                                     onChange={handleFileUpload}
                                     className="block w-full text-sm text-gray-500
                                         file:mr-4 file:py-2 file:px-4
