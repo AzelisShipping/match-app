@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Match App with Editable Threshold and Pallet/Pack Tab</title>
+  <title>Match App with Multi-Pallet/Pack Ranges</title>
   <!-- Tailwind CSS from CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- React, ReactDOM, and Babel from CDN -->
@@ -20,969 +20,1015 @@
       font-family: sans-serif;
       background-color: #f9fafb; /* Tailwind gray-50 */
     }
+    /* Make the read-only input background a bit lighter */
+    input[readonly] {
+      background-color: #f0f0f0;
+      color: #666;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 <body>
-  <div id="root"></div>
+<div id="root"></div>
 
-  <script type="text/babel">
+<script type="text/babel">
 
-  /***************************************************************************
-   * 1) Utility Functions
-   ***************************************************************************/
+/***************************************************************************
+ * 1) Utility Functions
+ ***************************************************************************/
 
-  // Safely parse a string or number to float. Returns null if invalid.
-  function floatify(val) {
-    const num = parseFloat(val);
-    return isNaN(num) ? null : num;
+// Safely parse a string or number to float. Returns null if invalid.
+function floatify(val) {
+  const num = parseFloat(val);
+  return isNaN(num) ? null : num;
+}
+
+// Example: If "Azelis Code" includes "123KG", parse out "123"
+function splitData(s) {
+  const str = String(s);
+  const match = str.match(/(\d+)(?=KG)/i);
+  if (match) {
+    return parseFloat(match[1]);
   }
+  return null;
+}
 
-  // Example: If "Azelis Code" includes "123KG", parse out "123"
-  function splitData(s) {
-    const str = String(s);
-    const match = str.match(/(\d+)(?=KG)/i);
-    if (match) {
-      return parseFloat(match[1]);
-    }
-    return null;
-  }
+// Jaro–Winkler distance (0..1)
+function jaroWinkler(str1, str2) {
+  const s1 = str1.toLowerCase().trim();
+  const s2 = str2.toLowerCase().trim();
+  if (s1 === s2) return 1.0;
 
-  // Jaro–Winkler distance (0..1)
-  function jaroWinkler(str1, str2) {
-    const s1 = str1.toLowerCase().trim();
-    const s2 = str2.toLowerCase().trim();
-    if (s1 === s2) return 1.0;
+  const matchDist = Math.floor(Math.max(s1.length, s2.length) / 2) - 1;
+  const s1Matches = new Array(s1.length).fill(false);
+  const s2Matches = new Array(s2.length).fill(false);
 
-    const matchDist = Math.floor(Math.max(s1.length, s2.length) / 2) - 1;
-    const s1Matches = new Array(s1.length).fill(false);
-    const s2Matches = new Array(s2.length).fill(false);
+  let matches = 0;
+  let transpositions = 0;
 
-    let matches = 0;
-    let transpositions = 0;
-
-    for (let i = 0; i < s1.length; i++) {
-      const start = Math.max(0, i - matchDist);
-      const end = Math.min(s2.length - 1, i + matchDist);
-      for (let j = start; j <= end; j++) {
-        if (!s2Matches[j] && s1[i] === s2[j]) {
-          s1Matches[i] = true;
-          s2Matches[j] = true;
-          matches++;
-          break;
-        }
+  for (let i = 0; i < s1.length; i++) {
+    const start = Math.max(0, i - matchDist);
+    const end = Math.min(s2.length - 1, i + matchDist);
+    for (let j = start; j <= end; j++) {
+      if (!s2Matches[j] && s1[i] === s2[j]) {
+        s1Matches[i] = true;
+        s2Matches[j] = true;
+        matches++;
+        break;
       }
     }
-
-    if (!matches) return 0.0;
-
-    let k = 0;
-    for (let i = 0; i < s1.length; i++) {
-      if (s1Matches[i]) {
-        while (!s2Matches[k]) k++;
-        if (s1[i] !== s2[k]) transpositions++;
-        k++;
-      }
-    }
-    transpositions /= 2.0;
-
-    const m = matches;
-    const jaro = (m / s1.length + m / s2.length + (m - transpositions) / m) / 3.0;
-
-    // Winkler prefix
-    let prefix = 0;
-    for (let i = 0; i < Math.min(s1.length, s2.length, 4); i++) {
-      if (s1[i] === s2[i]) prefix++;
-      else break;
-    }
-    const p = 0.1;
-    return jaro + prefix * p * (1 - jaro);
   }
 
-  function cleanString(str) {
-    if (!str) return '';
-    return str
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, '')  // keep letters/digits/spaces
-      .replace(/\s+/g, ' ')
-      .trim();
+  if (!matches) return 0.0;
+
+  let k = 0;
+  for (let i = 0; i < s1.length; i++) {
+    if (s1Matches[i]) {
+      while (!s2Matches[k]) k++;
+      if (s1[i] !== s2[k]) transpositions++;
+      k++;
+    }
+  }
+  transpositions /= 2.0;
+
+  const m = matches;
+  const jaro = (m / s1.length + m / s2.length + (m - transpositions) / m) / 3.0;
+
+  // Winkler prefix
+  let prefix = 0;
+  for (let i = 0; i < Math.min(s1.length, s2.length, 4); i++) {
+    if (s1[i] === s2[i]) prefix++;
+    else break;
+  }
+  const p = 0.1;
+  return jaro + prefix * p * (1 - jaro);
+}
+
+function cleanString(str) {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')  // keep letters/digits/spaces
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Fallback for partial word overlap + abbreviation
+function fallbackWordAbbrevScore(azDescClean, supDescClean, jwSimilarityPct) {
+  const azTokens = azDescClean.split(' ');
+  const supTokens = supDescClean.split(' ');
+
+  const azSet = new Set(azTokens);
+  const supSet = new Set(supTokens);
+  const commonWords = [...azSet].filter(x => supSet.has(x));
+  const maxSize = Math.max(azSet.size, supSet.size) || 1;
+  const wordRatio = commonWords.length / maxSize;
+
+  const abbr = (tokens) => tokens.map(t => t[0]).join('');
+  const azAbbr = abbr(azTokens);
+  const supAbbr = abbr(supTokens);
+  let abbrBonus = 0;
+  if (azAbbr && supAbbr && azAbbr === supAbbr) {
+    abbrBonus = 10;
   }
 
-  // Fallback for partial word overlap + abbreviation
-  function fallbackWordAbbrevScore(azDescClean, supDescClean, jwSimilarityPct) {
-    const azTokens = azDescClean.split(' ');
-    const supTokens = supDescClean.split(' ');
+  // Weighted combination
+  const fallbackScore = jwSimilarityPct * 0.6 + wordRatio * 30 + abbrBonus;
+  return fallbackScore > 99 ? 99 : fallbackScore;
+}
 
-    const azSet = new Set(azTokens);
-    const supSet = new Set(supTokens);
-    const commonWords = [...azSet].filter(x => supSet.has(x));
-    const maxSize = Math.max(azSet.size, supSet.size) || 1;
-    const wordRatio = commonWords.length / maxSize;
-
-    const abbr = (tokens) => tokens.map(t => t[0]).join('');
-    const azAbbr = abbr(azTokens);
-    const supAbbr = abbr(supTokens);
-    let abbrBonus = 0;
-    if (azAbbr && supAbbr && azAbbr === supAbbr) {
-      abbrBonus = 10;
-    }
-
-    // Weighted combination
-    const fallbackScore = jwSimilarityPct * 0.6 + wordRatio * 30 + abbrBonus;
-    return fallbackScore > 99 ? 99 : fallbackScore;
+/**
+ * Scoring function. 
+ *   - If JW < 0.50 => descScore=0
+ *   - If JW >= 0.98 => descScore=100
+ *   - Otherwise => fallback partial
+ */
+function calculateAllScores(azDesc, azWeight, supDesc, supWeight) {
+  const azClean = cleanString(azDesc);
+  const supClean = cleanString(supDesc);
+  if (!azClean || !supClean) {
+    return [0, 0, 0];
   }
 
-  /**
-   * This is the main function used for scoring. 
-   * We'll keep the "stricter logic" approach:
-   *   - If JW < 0.50 => descScore=0
-   *   - If JW >= 0.98 => descScore=100
-   *   - Otherwise => fallback partial
-   */
-  function calculateAllScores(azDesc, azWeight, supDesc, supWeight) {
-    const azClean = cleanString(azDesc);
-    const supClean = cleanString(supDesc);
-    if (!azClean || !supClean) {
-      return [0, 0, 0];
-    }
-
-    const jwVal = jaroWinkler(azClean, supClean);
-    let descScore;
-    if (jwVal >= 0.98) {
-      descScore = 100;
-    } else if (jwVal < 0.50) {
-      descScore = 0;
-    } else {
-      const fallback = fallbackWordAbbrevScore(azClean, supClean, jwVal * 100);
-      descScore = Math.min(99, fallback);
-    }
-
-    const wScore = weightScore(azWeight, supWeight);
-
-    const total = 0.7 * descScore + 0.3 * wScore;
-    return [
-      parseFloat(descScore.toFixed(2)),
-      parseFloat(wScore.toFixed(2)),
-      parseFloat(total.toFixed(2))
-    ];
+  const jwVal = jaroWinkler(azClean, supClean);
+  let descScore;
+  if (jwVal >= 0.98) {
+    descScore = 100;
+  } else if (jwVal < 0.50) {
+    descScore = 0;
+  } else {
+    const fallback = fallbackWordAbbrevScore(azClean, supClean, jwVal * 100);
+    descScore = Math.min(99, fallback);
   }
 
-  // Weight difference => degrade with difference
-  function weightScore(azWeight, supWeight) {
-    const azNum = floatify(azWeight);
-    const supNum = floatify(supWeight);
-    if (azNum === null || supNum === null) return 0;
+  const wScore = weightScore(azWeight, supWeight);
 
-    const diff = Math.abs(azNum - supNum);
-    if (diff < 0.00001) return 100;
-    else if (diff <= 0.1) return 95;
-    else if (diff <= 0.5) return 85;
-    return Math.max(0, 85 - (diff - 0.5) * 2);
-  }
+  const total = 0.7 * descScore + 0.3 * wScore;
+  return [
+    parseFloat(descScore.toFixed(2)),
+    parseFloat(wScore.toFixed(2)),
+    parseFloat(total.toFixed(2))
+  ];
+}
 
-  // Surcharge 1: Pack Weight
-  function applyPackWeightSurcharges(lineObj, packweightRows) {
-    if (!packweightRows || packweightRows.length === 0) {
-      return lineObj;
-    }
+// Weight difference => degrade with difference
+function weightScore(azWeight, supWeight) {
+  const azNum = floatify(azWeight);
+  const supNum = floatify(supWeight);
+  if (azNum === null || supNum === null) return 0;
 
-    const supWeight = floatify(lineObj['Matched Supplier Weight']);
-    let basePrice = floatify(lineObj['Matched Supplier Price']) || 0;
-    let totalPwSurcharge = 0;
+  const diff = Math.abs(azNum - supNum);
+  if (diff < 0.00001) return 100;
+  else if (diff <= 0.1) return 95;
+  else if (diff <= 0.5) return 85;
+  return Math.max(0, 85 - (diff - 0.5) * 2);
+}
 
-    for (let row of packweightRows) {
-      const pwFrom = floatify(row['Pack From']);
-      const pwTo = floatify(row['Pack To']);
-      const addVal = floatify(row['Additional Charge']) || 0;
+/***************************************************************************
+ * Surcharges & PalletPack expansions
+ ***************************************************************************/
 
-      const fromVal = pwFrom === null ? -Infinity : pwFrom;
-      const toVal = pwTo === null ? Infinity : pwTo;
-
-      if (supWeight !== null && supWeight >= fromVal && supWeight <= toVal) {
-        totalPwSurcharge += addVal;
-      }
-    }
-
-    lineObj['Pack Weight Surcharge'] = parseFloat(totalPwSurcharge.toFixed(2));
-    lineObj['Matched Supplier Price'] = parseFloat(
-      (basePrice + totalPwSurcharge).toFixed(2)
-    );
+// 1) Pack Weight Surcharges
+function applyPackWeightSurcharges(lineObj, packweightRows) {
+  if (!packweightRows || packweightRows.length === 0) {
     return lineObj;
   }
 
-  // Surcharge 2: Logistic
-  function applyLogisticSurcharges(lineObj, logisticRows) {
-    if (!logisticRows || logisticRows.length === 0) {
-      return [lineObj];
+  const supWeight = floatify(lineObj['Matched Supplier Weight']);
+  let basePrice = floatify(lineObj['Matched Supplier Price']) || 0;
+  let totalPwSurcharge = 0;
+
+  for (let row of packweightRows) {
+    const pwFrom = floatify(row['Pack From']);
+    const pwTo = floatify(row['Pack To']);
+    const addVal = floatify(row['Additional Charge']) || 0;
+
+    const fromVal = pwFrom === null ? -Infinity : pwFrom;
+    const toVal = pwTo === null ? Infinity : pwTo;
+
+    if (supWeight !== null && supWeight >= fromVal && supWeight <= toVal) {
+      totalPwSurcharge += addVal;
     }
-
-    const lines = [];
-    let mainLine = { ...lineObj };
-    let basePrice = floatify(mainLine['Matched Supplier Price']) || 0;
-    let logisticSum = floatify(mainLine['Logistic Surcharge']) || 0;
-    if (!logisticSum) logisticSum = 0;
-
-    const supFrom = floatify(mainLine['Matched Supplier From']);
-    const supTo = floatify(mainLine['Matched Supplier To']);
-
-    const extraLines = [];
-
-    for (let row of logisticRows) {
-      let lFrom = floatify(row['Logistic From']);
-      let lTo = floatify(row['Logistic To']);
-      let addVal = floatify(row['Additional Charge']) || 0;
-
-      if (lFrom === null) lFrom = -Infinity;
-      if (lTo === null) lTo = Infinity;
-
-      // If logistic range matches the supplier's range
-      if (lFrom === supFrom && lTo === supTo) {
-        basePrice += addVal;
-        logisticSum += addVal;
-      } else {
-        // Create a new line for the extra logistic break
-        const newLine = { ...mainLine };
-        let newPrice = floatify(newLine['Matched Supplier Price']) || 0;
-        newPrice += addVal;
-        newLine['Matched Supplier From'] = `(Extra Logistic) ${lFrom}`;
-        newLine['Matched Supplier To'] = `(Extra Logistic) ${lTo}`;
-        newLine['Matched Supplier Price'] = parseFloat(newPrice.toFixed(2));
-        newLine['Logistic Surcharge'] = parseFloat(addVal.toFixed(2));
-        newLine['Description Match Score'] = '';
-        newLine['Weight Match Score'] = '';
-        newLine['Total Score'] = '';
-        extraLines.push(newLine);
-      }
-    }
-
-    mainLine['Matched Supplier Price'] = parseFloat(basePrice.toFixed(2));
-    mainLine['Logistic Surcharge'] = parseFloat(logisticSum.toFixed(2));
-    lines.push(mainLine);
-    lines.push(...extraLines);
-
-    return lines;
   }
 
-  // Surcharge 3: Pallet/Pack Price Break
-  /**
-   * This function will look at the new "palletpackRows" data. 
-   * We’ll match the “Supplier Description” from the row with this line’s “Matched Supplier Description.”
-   * Then for each row that matches, we generate a new line for the pallet break range.
-   *
-   * Example usage:
-   *   - If the palletpack table says: "Supplier Description"= "abc", "Weight Per Pallet"=800,
-   *     "Pallet From"=0, "Pallet To"=4, "Price USD"=2
-   *   - Then we interpret that as 0..4 pallets => 0..(4*800)=3200 kg => price=2 (maybe per kg).
-   *
-   * Here, we simplify by generating new lines. 
-   * In real usage, you might want to do a different approach (like combine or override pricing).
-   */
-  function applyPalletPackBreaks(lineObj, palletpackRows) {
-    if (!palletpackRows || palletpackRows.length === 0) {
-      return [lineObj];
-    }
+  lineObj['Pack Weight Surcharge'] = parseFloat(totalPwSurcharge.toFixed(2));
+  lineObj['Matched Supplier Price'] = parseFloat(
+    (basePrice + totalPwSurcharge).toFixed(2)
+  );
+  return lineObj;
+}
 
-    const matchedSupplierDesc = (lineObj['Matched Supplier Description'] || '').trim().toLowerCase();
-    if (!matchedSupplierDesc) {
-      return [lineObj];
-    }
+// 2) Logistic Surcharges
+function applyLogisticSurcharges(lineObj, logisticRows) {
+  if (!logisticRows || logisticRows.length === 0) {
+    return [lineObj];
+  }
 
-    // Filter only relevant palletpack rows for this supplier description
-    const relevantPPRows = palletpackRows.filter(pp => {
-      const desc = (pp['Supplier Description'] || '').trim().toLowerCase();
-      return desc === matchedSupplierDesc;
-    });
+  const lines = [];
+  let mainLine = { ...lineObj };
+  let basePrice = floatify(mainLine['Matched Supplier Price']) || 0;
+  let logisticSum = floatify(mainLine['Logistic Surcharge']) || 0;
+  if (!logisticSum) logisticSum = 0;
 
-    if (!relevantPPRows.length) {
-      return [lineObj];
-    }
+  const supFrom = floatify(mainLine['Matched Supplier From']);
+  const supTo = floatify(mainLine['Matched Supplier To']);
 
-    // We'll create a "main line" plus additional lines for each price break
-    const lines = [];
-    let mainLine = { ...lineObj };
-    let basePrice = floatify(mainLine['Matched Supplier Price']) || 0;
+  const extraLines = [];
 
-    // We'll keep track of all extra lines
-    const extraLines = [];
+  for (let row of logisticRows) {
+    let lFrom = floatify(row['Logistic From']);
+    let lTo = floatify(row['Logistic To']);
+    let addVal = floatify(row['Additional Charge']) || 0;
 
-    for (let row of relevantPPRows) {
-      const packWeight = floatify(row['Pack Weight']);            // e.g. "200"
-      const wPerPallet = floatify(row['Weight Per Pallet']);      // e.g. "800"
-      let palFrom = floatify(row['Pallet From']);                 // e.g. "0"
-      let palTo = floatify(row['Pallet To']);                     // e.g. "4"
-      const priceUsd = floatify(row['Price USD']) || 0;           // e.g. "2"
+    if (lFrom === null) lFrom = -Infinity;
+    if (lTo === null) lTo = Infinity;
 
-      if (palFrom === null) palFrom = -Infinity;
-      if (palTo === null) palTo = Infinity;
-
-      // Convert pallet range to kg range if we have wPerPallet
-      let fromKG = wPerPallet ? palFrom * wPerPallet : palFrom;
-      let toKG = wPerPallet ? palTo * wPerPallet : palTo;
-
-      // Create a new line for this pallet range
+    // If logistic range matches the supplier's range, add to main line
+    if (lFrom === supFrom && lTo === supTo) {
+      basePrice += addVal;
+      logisticSum += addVal;
+    } else {
+      // Create a new line for an extra logistic break
       const newLine = { ...mainLine };
-      let newPrice = priceUsd;
-
-      // Here you might decide if "priceUsd" is a total or a rate "per kg." 
-      // For demonstration, we treat "Price USD" as a final "per kg" price.
-      // We’ll assume "Matched Supplier Weight" is the order weight, so maybe multiply by newPrice?
-      // But your scenario might differ. 
-      // Below, we simply store "newPrice" as the line's "Matched Supplier Price" for that break.
-
-      newLine['Matched Supplier From'] = `(Pallet) ${fromKG}`;
-      newLine['Matched Supplier To'] = `(Pallet) ${toKG}`;
+      let newPrice = floatify(newLine['Matched Supplier Price']) || 0;
+      newPrice += addVal;
+      newLine['Matched Supplier From'] = `(Extra Logistic) ${lFrom}`;
+      newLine['Matched Supplier To'] = `(Extra Logistic) ${lTo}`;
       newLine['Matched Supplier Price'] = parseFloat(newPrice.toFixed(2));
-      newLine['PalletPack Info'] = `${palFrom}..${palTo} Pallets => ${fromKG}..${toKG} KG @ ${priceUsd} USD`;
-
-      // Since these are new lines, we typically blank out match scores unless you want them repeated
+      newLine['Logistic Surcharge'] = parseFloat(addVal.toFixed(2));
+      // Clear these scores so we don't sum them up incorrectly
       newLine['Description Match Score'] = '';
       newLine['Weight Match Score'] = '';
       newLine['Total Score'] = '';
-
       extraLines.push(newLine);
     }
-
-    // Optionally keep the main line as the "base" or remove it
-    // We'll keep it so we see the "original" line as well
-    lines.push(mainLine);
-    lines.push(...extraLines);
-
-    return lines;
   }
 
-  /***************************************************************************
-   * 2) Core “Process DataFrames” Logic
-   ***************************************************************************/
+  mainLine['Matched Supplier Price'] = parseFloat(basePrice.toFixed(2));
+  mainLine['Logistic Surcharge'] = parseFloat(logisticSum.toFixed(2));
+  lines.push(mainLine);
+  lines.push(...extraLines);
 
-  /**
-   * Now we accept a dynamic descThreshold. We'll compare dScore >= descThreshold
-   * to decide if the supplier group is "good enough."
-   */
-  function processDataframes(
-    azelisRows,
-    supplierRows,
-    logisticRows,
-    packweightRows,
-    descThreshold,
-    palletPackRows // NEW
-  ) {
-    // 1) Clean & parse Azelis
-    for (let row of azelisRows) {
-      const codeVal = row['Azelis Code'] || '';
-      row['Azelis Pack Weight'] = splitData(codeVal);
-      row['Azelis Description'] = (row['Description'] || '').trim();
-    }
+  return lines;
+}
 
-    // 2) Clean & parse Supplier
-    for (let row of supplierRows) {
-      row['Supplier Description'] = (row['Supplier Description'] || '').trim();
-      row['Weight'] = floatify(row['Weight']);
-    }
+// 3) Pallet/Pack expansions with multiple breaks in one row
+/**
+ * We have columns:
+ *   - Supplier Description
+ *   - Pack Weight
+ *   - Pallet Factor
+ *   - Weight Per Pallet (computed = Pack Weight * Pallet Factor)
+ *   - Then for i=1..10 => Pallet From i, Pallet To i, Price i
+ *
+ * For each row in the "palletpack" table, if the "Supplier Description" matches
+ * the line's "Matched Supplier Description", we parse the 10 sets of from/to/price.
+ * If not blank, we create a new line. 
+ * We multiply "pallet from" and "pallet to" by "weight per pallet" to get fromKG..toKG range.
+ */
+function applyMultiPalletPackBreaks(lineObj, palletpackRows) {
+  if (!palletpackRows || palletpackRows.length === 0) {
+    return [lineObj];
+  }
 
-    // 3) Clean logistic
-    const cleanLogistic = logisticRows.filter(r =>
-      (r['Logistic From'] !== '' && r['Logistic To'] !== '') ||
-      r['Additional Charge'] !== ''
-    ).map(r => ({
-      'Logistic From': floatify(r['Logistic From']),
-      'Logistic To': floatify(r['Logistic To']),
-      'Additional Charge': floatify(r['Additional Charge']) || 0
-    }));
+  const matchedSupplierDesc = (lineObj['Matched Supplier Description'] || '').trim().toLowerCase();
+  if (!matchedSupplierDesc) {
+    return [lineObj];
+  }
 
-    // 4) Clean pack weight
-    const cleanPackWeight = packweightRows.filter(r =>
-      (r['Pack From'] !== '' && r['Pack To'] !== '') ||
-      r['Additional Charge'] !== ''
-    ).map(r => ({
-      'Pack From': floatify(r['Pack From']),
-      'Pack To': floatify(r['Pack To']),
-      'Additional Charge': floatify(r['Additional Charge']) || 0
-    }));
+  // Filter rows for this supplier description
+  const relevant = palletpackRows.filter(pp => {
+    const desc = (pp['Supplier Description'] || '').trim().toLowerCase();
+    return desc === matchedSupplierDesc;
+  });
 
-    // 5) Clean pallet/pack data (new)
-    const cleanPalletPack = palletPackRows.filter(r =>
-      (r['Supplier Description'] !== '' && r['Price USD'] !== '') ||
-      (r['Pallet From'] !== '' && r['Pallet To'] !== '')
-    ).map(r => ({
-      'Supplier Description': r['Supplier Description'] || '',
-      'Pack Weight': r['Pack Weight'] || '',
-      'Weight Per Pallet': r['Weight Per Pallet'] || '',
-      'Pallet From': r['Pallet From'] || '',
-      'Pallet To': r['Pallet To'] || '',
-      'Price USD': r['Price USD'] || ''
-    }));
+  if (!relevant.length) {
+    return [lineObj];
+  }
 
-    // Group Azelis by desc
-    const azelisGroups = {};
-    for (let row of azelisRows) {
-      const desc = (row['Azelis Description'] || '').toLowerCase();
-      if (!azelisGroups[desc]) {
-        azelisGroups[desc] = [];
+  // We'll create "base line" plus extra lines
+  const lines = [];
+  const baseLine = { ...lineObj };
+  lines.push(baseLine);
+
+  // For each relevant row, parse up to 10 sets
+  relevant.forEach(pp => {
+    const packWt = floatify(pp['Pack Weight']) || 0;
+    const palFactor = floatify(pp['Pallet Factor']) || 0;
+    // The user wants a "visual" on weight per pallet => packWt * palFactor
+    const weightPerPallet = packWt * palFactor;
+
+    // Now for i in [1..10], parse from/to/price
+    for (let i = 1; i <= 10; i++) {
+      const fKey = `Pallet From ${i}`;
+      const tKey = `Pallet To ${i}`;
+      const pKey = `Price ${i}`;
+
+      const palFromVal = floatify(pp[fKey]);
+      const palToVal = floatify(pp[tKey]);
+      const priceVal = floatify(pp[pKey]);
+
+      // If any is non-null, we treat it as a valid break row
+      if (palFromVal !== null && palToVal !== null && priceVal !== null) {
+        // Create a new line 
+        const newLine = { ...lineObj };
+
+        // Convert pallet range to kg range
+        let fromKG = palFromVal * weightPerPallet;
+        let toKG = palToVal * weightPerPallet;
+
+        // We'll just store that price as a "Matched Supplier Price"
+        // You can decide if it's total or per-kg. 
+        newLine['Matched Supplier From'] = `(PalletBreak) ${fromKG}`;
+        newLine['Matched Supplier To'] = `(PalletBreak) ${toKG}`;
+        newLine['Matched Supplier Price'] = parseFloat(priceVal.toFixed(2));
+
+        // We'll store info in a new field
+        newLine['PalletPack Info'] = `Row with pack=${packWt}, factor=${palFactor}, from=${palFromVal}..${palToVal} => ${fromKG}..${toKG} kg at $${priceVal}`;
+
+        // Clear match scores to avoid summing incorrectly
+        newLine['Description Match Score'] = '';
+        newLine['Weight Match Score'] = '';
+        newLine['Total Score'] = '';
+
+        lines.push(newLine);
       }
-      azelisGroups[desc].push(row);
     }
+  });
 
-    // Group Supplier by desc
-    const supplierGroups = {};
-    for (let row of supplierRows) {
-      const desc = (row['Supplier Description'] || '').toLowerCase();
-      if (!supplierGroups[desc]) {
-        supplierGroups[desc] = [];
-      }
-      supplierGroups[desc].push(row);
+  return lines;
+}
+
+/***************************************************************************
+ * 2) Core “Process DataFrames” Logic
+ ***************************************************************************/
+
+/**
+ * We'll compare dScore >= descThreshold to decide if the supplier group is "good enough."
+ */
+function processDataframes(
+  azelisRows,
+  supplierRows,
+  logisticRows,
+  packweightRows,
+  descThreshold,
+  palletpackRows
+) {
+  // 1) Clean & parse Azelis
+  for (let row of azelisRows) {
+    const codeVal = row['Azelis Code'] || '';
+    row['Azelis Pack Weight'] = splitData(codeVal);
+    row['Azelis Description'] = (row['Description'] || '').trim();
+  }
+
+  // 2) Clean & parse Supplier
+  for (let row of supplierRows) {
+    row['Supplier Description'] = (row['Supplier Description'] || '').trim();
+    row['Weight'] = floatify(row['Weight']);
+  }
+
+  // 3) Clean logistic
+  const cleanLogistic = logisticRows.filter(r =>
+    (r['Logistic From'] !== '' && r['Logistic To'] !== '') ||
+    r['Additional Charge'] !== ''
+  ).map(r => ({
+    'Logistic From': floatify(r['Logistic From']),
+    'Logistic To': floatify(r['Logistic To']),
+    'Additional Charge': floatify(r['Additional Charge']) || 0
+  }));
+
+  // 4) Clean pack weight
+  const cleanPackWeight = packweightRows.filter(r =>
+    (r['Pack From'] !== '' && r['Pack To'] !== '') ||
+    r['Additional Charge'] !== ''
+  ).map(r => ({
+    'Pack From': floatify(r['Pack From']),
+    'Pack To': floatify(r['Pack To']),
+    'Additional Charge': floatify(r['Additional Charge']) || 0
+  }));
+
+  // 5) Clean palletpack: We'll keep them as strings, parse later
+  //    Actually let's store them as strings so we can parse from/to/price easily
+  //    in applyMultiPalletPackBreaks. We'll only skip rows that are fully blank.
+  const cleanPalletPack = palletpackRows.filter(r =>
+    (r['Supplier Description'] !== '' && r['Pack Weight'] !== '') ||
+    (r['Pallet Factor'] !== '') ||
+    Array.from({length:10}).some((_,i)=> r[`Pallet From ${i+1}`] || r[`Pallet To ${i+1}`] || r[`Price ${i+1}`])
+  );
+
+  // Group Azelis by desc
+  const azelisGroups = {};
+  for (let row of azelisRows) {
+    const desc = (row['Azelis Description'] || '').toLowerCase();
+    if (!azelisGroups[desc]) {
+      azelisGroups[desc] = [];
     }
+    azelisGroups[desc].push(row);
+  }
 
-    const finalRows = [];
-    const scoreThreshold = descThreshold || 90; // fallback if blank
+  // Group Supplier by desc
+  const supplierGroups = {};
+  for (let row of supplierRows) {
+    const desc = (row['Supplier Description'] || '').toLowerCase();
+    if (!supplierGroups[desc]) {
+      supplierGroups[desc] = [];
+    }
+    supplierGroups[desc].push(row);
+  }
 
-    // For each Azelis desc group
-    for (let [azDesc, azRows] of Object.entries(azelisGroups)) {
-      let bestMatches = [];
-      let bestScore = -1;
+  const finalRows = [];
+  const scoreThreshold = descThreshold || 90;
 
-      // We first find which supplier desc passes the threshold
-      for (let [supDesc, supRows] of Object.entries(supplierGroups)) {
-        const [dScore] = calculateAllScores(azDesc, null, supDesc, null);
-        if (dScore >= scoreThreshold) {
-          bestMatches = bestMatches.concat(supRows);
-          if (dScore > bestScore) {
-            bestScore = dScore;
-          }
+  // For each Azelis desc group
+  for (let [azDesc, azRows] of Object.entries(azelisGroups)) {
+    let bestMatches = [];
+    let bestScore = -1;
+
+    // Find which supplier desc passes the threshold
+    for (let [supDesc, supRows] of Object.entries(supplierGroups)) {
+      const [dScore] = calculateAllScores(azDesc, null, supDesc, null);
+      if (dScore >= scoreThreshold) {
+        bestMatches = bestMatches.concat(supRows);
+        if (dScore > bestScore) {
+          bestScore = dScore;
         }
       }
+    }
 
-      if (bestMatches.length === 0) {
-        // "No Match Found"
-        for (let azRow of azRows) {
-          finalRows.push({
-            'Azelis Code': azRow['Azelis Code'] || '',
-            'Azelis Description': azRow['Azelis Description'] || '',
-            'Azelis Pack Weight': floatify(azRow['Azelis Pack Weight']) || '',
-            'Matched Supplier Description': 'No Match Found',
-            'Matched Supplier SKU': '',
-            'Matched Supplier Weight': '',
-            'Matched Supplier Price': '',
-            'Matched Supplier From': '',
-            'Matched Supplier To': '',
-            'Pack Weight Surcharge': '',
-            'Logistic Surcharge': '',
-            'PalletPack Info': '',
-            'Description Match Score': '',
-            'Weight Match Score': '',
-            'Total Score': ''
-          });
-        }
-        continue;
-      }
-
-      // Next, group the bestMatches by desc+weight
-      const descWeightGroups = {};
-      for (let supRow of bestMatches) {
-        const supDesc = (supRow['Supplier Description'] || '').toLowerCase();
-        const supWeight = floatify(supRow['Weight']);
-        const groupKey = `${supDesc}|${supWeight}`;
-        if (!descWeightGroups[groupKey]) {
-          descWeightGroups[groupKey] = [];
-        }
-        descWeightGroups[groupKey].push(supRow);
-      }
-
-      // Now do the row-level matching
+    if (bestMatches.length === 0) {
+      // "No Match Found"
       for (let azRow of azRows) {
-        const azWeight = floatify(azRow['Azelis Pack Weight']);
-        let bestGroupKey = null;
-        let bestWeightDiff = Infinity;
-        let bestDescScore = -1;
+        finalRows.push({
+          'Azelis Code': azRow['Azelis Code'] || '',
+          'Azelis Description': azRow['Azelis Description'] || '',
+          'Azelis Pack Weight': floatify(azRow['Azelis Pack Weight']) || '',
+          'Matched Supplier Description': 'No Match Found',
+          'Matched Supplier SKU': '',
+          'Matched Supplier Weight': '',
+          'Matched Supplier Price': '',
+          'Matched Supplier From': '',
+          'Matched Supplier To': '',
+          'Pack Weight Surcharge': '',
+          'Logistic Surcharge': '',
+          'PalletPack Info': '',
+          'Description Match Score': '',
+          'Weight Match Score': '',
+          'Total Score': ''
+        });
+      }
+      continue;
+    }
 
-        for (let [groupKey, supRows] of Object.entries(descWeightGroups)) {
-          const supRow = supRows[0];
-          const supWt = floatify(supRow['Weight']);
-          const supDesc = supRow['Supplier Description'];
+    // Next, group the bestMatches by desc+weight
+    const descWeightGroups = {};
+    for (let supRow of bestMatches) {
+      const supDesc = (supRow['Supplier Description'] || '').toLowerCase();
+      const supWeight = floatify(supRow['Weight']);
+      const groupKey = `${supDesc}|${supWeight}`;
+      if (!descWeightGroups[groupKey]) {
+        descWeightGroups[groupKey] = [];
+      }
+      descWeightGroups[groupKey].push(supRow);
+    }
 
-          const [dScore] = calculateAllScores(
-            azRow['Azelis Description'],
-            null,
-            supDesc,
-            null
-          );
+    // Row-level matching
+    for (let azRow of azRows) {
+      const azWeight = floatify(azRow['Azelis Pack Weight']);
+      let bestGroupKey = null;
+      let bestWeightDiff = Infinity;
+      let bestDescScore = -1;
 
-          if (azWeight !== null && supWt !== null) {
-            const weightDiff = Math.abs(azWeight - supWt);
-            
-            // Priority 1: exact desc match
-            if (dScore === 100 && (bestDescScore !== 100 || weightDiff < bestWeightDiff)) {
-              bestWeightDiff = weightDiff;
-              bestGroupKey = groupKey;
-              bestDescScore = dScore;
-            }
-            // Priority 2: better desc score
-            else if (dScore > bestDescScore) {
-              bestWeightDiff = weightDiff;
-              bestGroupKey = groupKey;
-              bestDescScore = dScore;
-            }
-            // Priority 3: same desc score but better weight match
-            else if (dScore === bestDescScore && weightDiff < bestWeightDiff) {
-              bestWeightDiff = weightDiff;
-              bestGroupKey = groupKey;
-              bestDescScore = dScore;
-            }
-          } else if (dScore > bestDescScore) {
-            // handle cases where weights are null
+      for (let [groupKey, supRows] of Object.entries(descWeightGroups)) {
+        const supRow = supRows[0];
+        const supWt = floatify(supRow['Weight']);
+        const supDesc = supRow['Supplier Description'];
+
+        const [dScore] = calculateAllScores(
+          azRow['Azelis Description'],
+          null,
+          supDesc,
+          null
+        );
+
+        if (azWeight !== null && supWt !== null) {
+          const weightDiff = Math.abs(azWeight - supWt);
+          // Priority 1: exact desc match
+          if (dScore === 100 && (bestDescScore !== 100 || weightDiff < bestWeightDiff)) {
+            bestWeightDiff = weightDiff;
             bestGroupKey = groupKey;
             bestDescScore = dScore;
           }
-        }
-
-        if (bestGroupKey) {
-          for (let supRow of descWeightGroups[bestGroupKey]) {
-            const supWeight = supRow['Weight'];
-            const supDesc = supRow['Supplier Description'];
-            const supPrice = supRow['Price'];
-            const supFrom = supRow['From'];
-            const supTo = supRow['To'];
-
-            const [dScore, wScore, tScore] = calculateAllScores(
-              azRow['Azelis Description'],
-              azWeight,
-              supDesc,
-              supWeight
-            );
-
-            let lineObj = {
-              'Azelis Code': azRow['Azelis Code'] || '',
-              'Azelis Description': azRow['Azelis Description'] || '',
-              'Azelis Pack Weight': azWeight !== null ? azWeight : '',
-              'Matched Supplier Description': supDesc || '',
-              'Matched Supplier SKU': supRow['SKU'] || '',
-              'Matched Supplier Weight': supWeight !== null ? supWeight : '',
-              'Matched Supplier Price': floatify(supPrice) || 0,
-              'Matched Supplier From': supFrom || '',
-              'Matched Supplier To': supTo || '',
-              'Pack Weight Surcharge': 0,
-              'Logistic Surcharge': 0,
-              'PalletPack Info': '',
-              'Description Match Score': dScore,
-              'Weight Match Score': wScore,
-              'Total Score': tScore
-            };
-
-            // 1) Apply pack weight surcharges
-            lineObj = applyPackWeightSurcharges(lineObj, cleanPackWeight);
-
-            // 2) Apply logistic surcharges
-            let linesAfterLogistics = [];
-            const logisticResults = applyLogisticSurcharges(lineObj, cleanLogistic);
-
-            // 3) For each logistic line, also apply pallet/pack breaks
-            for (let logLine of logisticResults) {
-              const palletPackLines = applyPalletPackBreaks(logLine, cleanPalletPack);
-              linesAfterLogistics.push(...palletPackLines);
-            }
-
-            finalRows.push(...linesAfterLogistics);
+          // Priority 2: better desc score
+          else if (dScore > bestDescScore) {
+            bestWeightDiff = weightDiff;
+            bestGroupKey = groupKey;
+            bestDescScore = dScore;
           }
-        } else {
-          finalRows.push({
+          // Priority 3: same desc score but better weight match
+          else if (dScore === bestDescScore && weightDiff < bestWeightDiff) {
+            bestWeightDiff = weightDiff;
+            bestGroupKey = groupKey;
+            bestDescScore = dScore;
+          }
+        } else if (dScore > bestDescScore) {
+          // handle cases where weights are null
+          bestGroupKey = groupKey;
+          bestDescScore = dScore;
+        }
+      }
+
+      if (bestGroupKey) {
+        for (let supRow of descWeightGroups[bestGroupKey]) {
+          const supWeight = supRow['Weight'];
+          const supDesc = supRow['Supplier Description'];
+          const supPrice = supRow['Price'];
+          const supFrom = supRow['From'];
+          const supTo = supRow['To'];
+
+          const [dScore, wScore, tScore] = calculateAllScores(
+            azRow['Azelis Description'],
+            azWeight,
+            supDesc,
+            supWeight
+          );
+
+          let lineObj = {
             'Azelis Code': azRow['Azelis Code'] || '',
             'Azelis Description': azRow['Azelis Description'] || '',
             'Azelis Pack Weight': azWeight !== null ? azWeight : '',
-            'Matched Supplier Description': 'No Weight Match Found',
-            'Matched Supplier SKU': '',
-            'Matched Supplier Weight': '',
-            'Matched Supplier Price': '',
-            'Matched Supplier From': '',
-            'Matched Supplier To': '',
-            'Pack Weight Surcharge': '',
-            'Logistic Surcharge': '',
+            'Matched Supplier Description': supDesc || '',
+            'Matched Supplier SKU': supRow['SKU'] || '',
+            'Matched Supplier Weight': supWeight !== null ? supWeight : '',
+            'Matched Supplier Price': floatify(supPrice) || 0,
+            'Matched Supplier From': supFrom || '',
+            'Matched Supplier To': supTo || '',
+            'Pack Weight Surcharge': 0,
+            'Logistic Surcharge': 0,
             'PalletPack Info': '',
-            'Description Match Score': bestScore,
-            'Weight Match Score': '',
-            'Total Score': ''
-          });
+            'Description Match Score': dScore,
+            'Weight Match Score': wScore,
+            'Total Score': tScore
+          };
+
+          // (A) Apply pack weight surcharges
+          lineObj = applyPackWeightSurcharges(lineObj, cleanPackWeight);
+
+          // (B) Apply logistic surcharges
+          let linesAfterLogistics = [];
+          const logisticResults = applyLogisticSurcharges(lineObj, cleanLogistic);
+
+          // (C) For each logistic line, also apply multi pallet/pack breaks
+          for (let logLine of logisticResults) {
+            const multiBreakLines = applyMultiPalletPackBreaks(logLine, cleanPalletPack);
+            linesAfterLogistics.push(...multiBreakLines);
+          }
+
+          finalRows.push(...linesAfterLogistics);
         }
+      } else {
+        finalRows.push({
+          'Azelis Code': azRow['Azelis Code'] || '',
+          'Azelis Description': azRow['Azelis Description'] || '',
+          'Azelis Pack Weight': azWeight !== null ? azWeight : '',
+          'Matched Supplier Description': 'No Weight Match Found',
+          'Matched Supplier SKU': '',
+          'Matched Supplier Weight': '',
+          'Matched Supplier Price': '',
+          'Matched Supplier From': '',
+          'Matched Supplier To': '',
+          'Pack Weight Surcharge': '',
+          'Logistic Surcharge': '',
+          'PalletPack Info': '',
+          'Description Match Score': bestScore,
+          'Weight Match Score': '',
+          'Total Score': ''
+        });
       }
     }
-
-    return finalRows;
   }
 
-  /***************************************************************************
-   * 3) EditableTable + Main React App
-   ***************************************************************************/
+  return finalRows;
+}
 
-  const Alert = ({ children }) => {
-    return (
-      <div className="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
-        {children}
-      </div>
-    );
+/***************************************************************************
+ * 3) EditableTable + Main React App
+ ***************************************************************************/
+
+const Alert = ({ children }) => {
+  return (
+    <div className="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+      {children}
+    </div>
+  );
+};
+
+// A small utility to generate [From i, To i, Price i] columns for i in [1..10]
+function generatePalletBreakColumns() {
+  const cols = [];
+  for (let i = 1; i <= 10; i++) {
+    cols.push({ key: `Pallet From ${i}`, label: `Pal From ${i}`, width:'80px' });
+    cols.push({ key: `Pallet To ${i}`, label: `Pal To ${i}`, width:'80px' });
+    cols.push({ key: `Price ${i}`, label: `Price ${i}`, width:'80px' });
+  }
+  return cols;
+}
+
+const EditableTable = ({ columns, data, setData }) => {
+  // We can do onPaste for multi-line paste
+  const handlePaste = (e, rowIndex, colIndex) => {
+    e.preventDefault();
+    const pastedText = e.clipboardData.getData('text');
+    const rows = pastedText.split(/\r\n|\n|\r/).filter(row => row.trim());
+    
+    // Split each row by tabs or multiple spaces
+    const pastedData = rows.map(row => row.split(/\t|\s{2,}/));
+
+    setData(current => {
+      const newData = [...current];
+      pastedData.forEach((rowVals, i) => {
+        const targetRow = rowIndex + i;
+        while (newData.length <= targetRow) {
+          const emptyRow = {};
+          columns.forEach(col => (emptyRow[col.key] = ''));
+          newData.push(emptyRow);
+        }
+        rowVals.forEach((cell, j) => {
+          const colKey = columns[colIndex + j]?.key;
+          if (colKey) {
+            newData[targetRow][colKey] = cell.trim();
+          }
+        });
+      });
+      return newData;
+    });
   };
 
-  const EditableTable = ({ columns, data, setData }) => {
-    const handlePaste = (e, rowIndex, colIndex) => {
-      e.preventDefault();
-      const pastedText = e.clipboardData.getData('text');
-      const rows = pastedText.split(/\r\n|\n|\r/).filter(row => row.trim());
-      
-      // Split each row by tabs or multiple spaces
-      const pastedData = rows.map(row => row.split(/\t|\s{2,}/));
+  const handleChange = (rowIndex, colKey, value) => {
+    setData(current => {
+      const newData = [...current];
+      newData[rowIndex] = { ...newData[rowIndex], [colKey]: value };
+      return newData;
+    });
+  };
 
-      setData(current => {
-        const newData = [...current];
-        pastedData.forEach((rowVals, i) => {
-          const targetRow = rowIndex + i;
-          while (newData.length <= targetRow) {
-            const emptyRow = {};
-            columns.forEach(col => (emptyRow[col.key] = ''));
-            newData.push(emptyRow);
-          }
-          rowVals.forEach((cell, j) => {
-            const colKey = columns[colIndex + j]?.key;
-            if (colKey) {
-              newData[targetRow][colKey] = cell.trim();
-            }
-          });
-        });
-        return newData;
-      });
-    };
-
-    const handleChange = (rowIndex, colKey, value) => {
-      setData(current => {
-        const newData = [...current];
-        newData[rowIndex] = { ...newData[rowIndex], [colKey]: value };
-        return newData;
-      });
-    };
-
-    return (
-      <div className="border rounded" style={{ height: '600px' }}>
-        <div className="overflow-auto h-full">
-          <table className="w-full table-fixed bg-white">
-            <thead className="sticky top-0 bg-gray-50 z-10">
-              <tr>
-                {columns.map(col => (
-                  <th
-                    key={col.key}
-                    className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-r"
-                    style={{ width: col.width || '150px' }}
-                  >
-                    {col.label}
-                  </th>
+  return (
+    <div className="border rounded" style={{ height: '600px' }}>
+      <div className="overflow-auto h-full">
+        <table className="w-full table-fixed bg-white">
+          <thead className="sticky top-0 bg-gray-50 z-10">
+            <tr>
+              {columns.map(col => (
+                <th
+                  key={col.key}
+                  className="px-2 py-1 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-r"
+                  style={{ width: col.width || '120px' }}
+                >
+                  {col.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((row, r) => (
+              <tr key={r} className="border-b hover:bg-gray-50">
+                {columns.map((col, c) => (
+                  <td key={col.key} className="border-r p-0">
+                    <input
+                      type="text"
+                      value={row[col.key] || ''}
+                      readOnly={col.readOnly}
+                      onChange={(e) => handleChange(r, col.key, e.target.value)}
+                      onPaste={(e) => handlePaste(e, r, c)}
+                      className="w-full h-8 px-2 border-0 focus:ring-1 focus:ring-blue-500 focus:ring-opacity-50 focus:outline-none"
+                    />
+                  </td>
                 ))}
               </tr>
-            </thead>
-            <tbody>
-              {data.map((row, r) => (
-                <tr key={r} className="border-b hover:bg-gray-50">
-                  {columns.map((col, c) => (
-                    <td key={col.key} className="border-r p-0">
-                      <input
-                        type="text"
-                        value={row[col.key] || ''}
-                        onChange={(e) => handleChange(r, col.key, e.target.value)}
-                        onPaste={(e) => handlePaste(e, r, c)}
-                        className="w-full h-8 px-3 border-0 focus:ring-1 focus:ring-blue-500 focus:ring-opacity-50 focus:outline-none"
-                      />
-                    </td>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+const MatchApp = () => {
+  const [activeTab, setActiveTab] = React.useState('azelis');
+  const [error, setError] = React.useState('');
+  const [results, setResults] = React.useState([]);
+
+  // Description threshold
+  const [descThreshold, setDescThreshold] = React.useState(90);
+
+  // Create default rows
+  const createRows = (cols, count=500) => {
+    const emptyRow = {};
+    cols.forEach(c => { emptyRow[c.key] = ''; });
+    return Array.from({ length: count }, () => ({ ...emptyRow }));
+  };
+
+  // 5 tabs: azelis, supplier, logistic, packweight, palletpack
+  // We'll define the extra columns for palletpack, including up to 10 breaks
+  const palletBreakCols = generatePalletBreakColumns();
+
+  const tableDefs = {
+    azelis: {
+      columns: [
+        { key: 'Azelis Code', label: 'Azelis Code', width: '150px' },
+        { key: 'Description', label: 'Description', width: '300px' }
+      ]
+    },
+    supplier: {
+      columns: [
+        { key: 'Supplier Description', label: 'Supplier Description', width: '300px' },
+        { key: 'SKU', label: 'SKU' },
+        { key: 'Weight', label: 'Weight' },
+        { key: 'Price', label: 'Price' },
+        { key: 'From', label: 'From' },
+        { key: 'To', label: 'To' }
+      ]
+    },
+    logistic: {
+      columns: [
+        { key: 'Logistic From', label: 'Logistic From' },
+        { key: 'Logistic To', label: 'Logistic To' },
+        { key: 'Additional Charge', label: 'Additional Charge' }
+      ]
+    },
+    packweight: {
+      columns: [
+        { key: 'Pack From', label: 'Pack From' },
+        { key: 'Pack To', label: 'Pack To' },
+        { key: 'Additional Charge', label: 'Additional Charge' }
+      ]
+    },
+    palletpack: {
+      columns: [
+        { key: 'Supplier Description', label: 'Supplier Desc', width: '200px' },
+        { key: 'Pack Weight', label: 'Pack Weight', width: '100px' },
+        { key: 'Pallet Factor', label: 'Pallet Factor', width: '100px' },
+        // (We won't store weight per pallet as an input column, 
+        // because we can compute it or show it in results. 
+        // If you want a read-only column for "Weight Per Pallet", you can add it. 
+        // For demonstration, let's do so:)
+        { key: 'Weight Per Pallet', label: 'W/Pal (auto)', width: '100px', readOnly: true },
+        ...palletBreakCols // 30 columns for 10 breaks
+      ]
+    }
+  };
+
+  // State for each table
+  const [azelisData, setAzelisData] = React.useState(createRows(tableDefs.azelis.columns));
+  const [supplierData, setSupplierData] = React.useState(createRows(tableDefs.supplier.columns));
+  const [logisticData, setLogisticData] = React.useState(createRows(tableDefs.logistic.columns, 200));
+  const [packweightData, setPackweightData] = React.useState(createRows(tableDefs.packweight.columns, 200));
+  const [palletPackData, setPalletPackData] = React.useState(createRows(tableDefs.palletpack.columns, 200));
+
+  // The function to handle any "readOnly" columns for palletpack: 
+  // we'll recalc "Weight Per Pallet" = packWeight * palletFactor
+  // We'll do a small effect that scans the palletpackData and updates the "Weight Per Pallet" column
+  React.useEffect(() => {
+    setPalletPackData(old => {
+      return old.map(row => {
+        const pw = floatify(row['Pack Weight']);
+        const pf = floatify(row['Pallet Factor']);
+        let wpp = '';
+        if (pw !== null && pf !== null) {
+          wpp = (pw * pf).toString();
+        }
+        return { ...row, ['Weight Per Pallet']: wpp };
+      });
+    });
+  }, [palletPackData]);
+
+  const addRow = () => {
+    switch (activeTab) {
+      case 'azelis':
+        setAzelisData(current => [...current, {}]);
+        break;
+      case 'supplier':
+        setSupplierData(current => [...current, {}]);
+        break;
+      case 'logistic':
+        setLogisticData(current => [...current, {}]);
+        break;
+      case 'packweight':
+        setPackweightData(current => [...current, {}]);
+        break;
+      case 'palletpack':
+        setPalletPackData(current => [...current, {}]);
+        break;
+      default:
+        break;
+    }
+  };
+
+  const getActiveTable = () => {
+    switch (activeTab) {
+      case 'azelis': return { data: azelisData, setData: setAzelisData, columns: tableDefs.azelis.columns };
+      case 'supplier': return { data: supplierData, setData: setSupplierData, columns: tableDefs.supplier.columns };
+      case 'logistic': return { data: logisticData, setData: setLogisticData, columns: tableDefs.logistic.columns };
+      case 'packweight': return { data: packweightData, setData: setPackweightData, columns: tableDefs.packweight.columns };
+      case 'palletpack': return { data: palletPackData, setData: setPalletPackData, columns: tableDefs.palletpack.columns };
+      default: return { data: [], setData: () => {}, columns: [] };
+    }
+  };
+
+  function cleanRows(rows, columns) {
+    // Keep any row that has at least one non-empty cell
+    return rows.filter(r =>
+      columns.some(col => String(r[col.key] || '').trim() !== '')
+    );
+  }
+
+  const processData = () => {
+    try {
+      const azelisCols = tableDefs.azelis.columns;
+      const supplierCols = tableDefs.supplier.columns;
+      const logisticCols = tableDefs.logistic.columns;
+      const packweightCols = tableDefs.packweight.columns;
+      const palletPackCols = tableDefs.palletpack.columns;
+
+      const cleanAzelis = cleanRows(azelisData, azelisCols);
+      const cleanSupplier = cleanRows(supplierData, supplierCols);
+      const cleanLogistic = cleanRows(logisticData, logisticCols);
+      const cleanPackweight = cleanRows(packweightData, packweightCols);
+      const cleanPalletPack = cleanRows(palletPackData, palletPackCols);
+
+      // parse the threshold from user input
+      const thresholdVal = parseFloat(descThreshold) || 90;
+
+      const finalRows = processDataframes(
+        cleanAzelis,
+        cleanSupplier,
+        cleanLogistic,
+        cleanPackweight,
+        thresholdVal,
+        cleanPalletPack
+      );
+
+      setResults(finalRows);
+      setError('');
+    } catch (err) {
+      setError('Error processing data: ' + err.message);
+    }
+  };
+
+  const exportResults = () => {
+    if (results.length === 0) return;
+    const ws = XLSX.utils.json_to_sheet(results);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Results");
+    XLSX.writeFile(wb, "match_results.xlsx");
+  };
+
+  const resetAll = () => {
+    setAzelisData(createRows(tableDefs.azelis.columns));
+    setSupplierData(createRows(tableDefs.supplier.columns));
+    setLogisticData(createRows(tableDefs.logistic.columns, 200));
+    setPackweightData(createRows(tableDefs.packweight.columns, 200));
+    setPalletPackData(createRows(tableDefs.palletpack.columns, 200));
+    setResults([]);
+    setError('');
+  };
+
+  const currentTab = getActiveTable();
+
+  return (
+    <div className="max-w-full p-4">
+      <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+        <h1 className="text-2xl font-bold mb-4">Match App (Multi-Pallet Ranges)</h1>
+
+        <div className="mb-4">
+          <label htmlFor="descThreshold" className="mr-2 font-semibold">
+            Description Score Threshold:
+          </label>
+          <input
+            id="descThreshold"
+            type="number"
+            step="1"
+            min="0"
+            max="100"
+            className="border px-2 py-1 w-20"
+            value={descThreshold}
+            onChange={(e) => setDescThreshold(e.target.value)}
+          />
+          <span className="ml-2 text-sm text-gray-600">
+            (Default 90. Raise for stricter matching, lower for more lenient.)
+          </span>
+        </div>
+
+        <div className="flex gap-4 mb-4">
+          <button
+            onClick={processData}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            Process Data
+          </button>
+          <button
+            onClick={exportResults}
+            disabled={results.length === 0}
+            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700
+                      disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Export Results
+          </button>
+          <button
+            onClick={resetAll}
+            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+          >
+            Reset
+          </button>
+          <button
+            onClick={() => window.location.href = 'supplier-extractor.html'}
+            className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
+          >
+            Extract Supplier Data
+          </button>
+        </div>
+       
+        {error && <Alert>{error}</Alert>}
+
+        <div className="mb-4">
+          <div className="border-b border-gray-200">
+            <nav className="-mb-px flex space-x-8">
+              {Object.keys(tableDefs).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`border-b-2 px-1 py-4 text-sm font-medium
+                    ${activeTab === tab
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                    }`}
+                >
+                  {tab.charAt(0).toUpperCase() + tab.slice(1)} Data
+                </button>
+              ))}
+            </nav>
+          </div>
+
+          <div className="mt-4">
+            <div className="mb-2 text-sm text-gray-600">
+              Tip: Paste data directly from Excel. Select the cell in the table where you want to start.
+            </div>
+            <EditableTable
+              columns={currentTab.columns}
+              data={currentTab.data}
+              setData={currentTab.setData}
+            />
+            <div className="mt-2">
+              <button
+                onClick={addRow}
+                className="px-2 py-1 bg-gray-200 text-sm rounded hover:bg-gray-300"
+              >
+                + Add Row
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {results.length > 0 && (
+          <div className="mt-4 overflow-x-auto">
+            <h2 className="text-xl font-bold mb-2">Results</h2>
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  {Object.keys(results[0]).map(header => (
+                    <th
+                      key={header}
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      {header}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  };
-
-  const MatchApp = () => {
-    const [activeTab, setActiveTab] = React.useState('azelis');
-    const [error, setError] = React.useState('');
-    const [results, setResults] = React.useState([]);
-
-    // 1) We store a user‐editable threshold for description:
-    const [descThreshold, setDescThreshold] = React.useState(90);
-
-    // We have 5 tabs now: azelis, supplier, logistic, packweight, palletpack
-    const createRows = (cols, count=500) => {
-      const emptyRow = {};
-      cols.forEach(c => { emptyRow[c.key] = ''; });
-      return Array.from({ length: count }, () => ({ ...emptyRow }));
-    };
-
-    const tableDefs = {
-      azelis: {
-        columns: [
-          { key: 'Azelis Code', label: 'Azelis Code', width: '150px' },
-          { key: 'Description', label: 'Description', width: '300px' }
-        ]
-      },
-      supplier: {
-        columns: [
-          { key: 'Supplier Description', label: 'Supplier Description', width: '300px' },
-          { key: 'SKU', label: 'SKU' },
-          { key: 'Weight', label: 'Weight' },
-          { key: 'Price', label: 'Price' },
-          { key: 'From', label: 'From' },
-          { key: 'To', label: 'To' }
-        ]
-      },
-      logistic: {
-        columns: [
-          { key: 'Logistic From', label: 'Logistic From' },
-          { key: 'Logistic To', label: 'Logistic To' },
-          { key: 'Additional Charge', label: 'Additional Charge' }
-        ]
-      },
-      packweight: {
-        columns: [
-          { key: 'Pack From', label: 'Pack From' },
-          { key: 'Pack To', label: 'Pack To' },
-          { key: 'Additional Charge', label: 'Additional Charge' }
-        ]
-      },
-      palletpack: {
-        columns: [
-          { key: 'Supplier Description', label: 'Supplier Description', width: '300px' },
-          { key: 'Pack Weight', label: 'Pack Weight' },
-          { key: 'Weight Per Pallet', label: 'Weight Per Pallet' },
-          { key: 'Pallet From', label: 'Pallet From' },
-          { key: 'Pallet To', label: 'Pallet To' },
-          { key: 'Price USD', label: 'Price USD' }
-        ]
-      }
-    };
-
-    const [azelisData, setAzelisData] = React.useState(createRows(tableDefs.azelis.columns));
-    const [supplierData, setSupplierData] = React.useState(createRows(tableDefs.supplier.columns));
-    const [logisticData, setLogisticData] = React.useState(createRows(tableDefs.logistic.columns, 200));
-    const [packweightData, setPackweightData] = React.useState(createRows(tableDefs.packweight.columns, 200));
-    const [palletPackData, setPalletPackData] = React.useState(createRows(tableDefs.palletpack.columns, 200));
-
-    const addRow = () => {
-      switch (activeTab) {
-        case 'azelis':
-          setAzelisData(current => [...current, {}]);
-          break;
-        case 'supplier':
-          setSupplierData(current => [...current, {}]);
-          break;
-        case 'logistic':
-          setLogisticData(current => [...current, {}]);
-          break;
-        case 'packweight':
-          setPackweightData(current => [...current, {}]);
-          break;
-        case 'palletpack':
-          setPalletPackData(current => [...current, {}]);
-          break;
-      }
-    };
-
-    const getActiveTable = () => {
-      switch (activeTab) {
-        case 'azelis': return { data: azelisData, setData: setAzelisData, columns: tableDefs.azelis.columns };
-        case 'supplier': return { data: supplierData, setData: setSupplierData, columns: tableDefs.supplier.columns };
-        case 'logistic': return { data: logisticData, setData: setLogisticData, columns: tableDefs.logistic.columns };
-        case 'packweight': return { data: packweightData, setData: setPackweightData, columns: tableDefs.packweight.columns };
-        case 'palletpack': return { data: palletPackData, setData: setPalletPackData, columns: tableDefs.palletpack.columns };
-        default: return { data: [], setData: () => {}, columns: [] };
-      }
-    };
-
-    function cleanRows(rows, columns) {
-      return rows.filter(r =>
-        columns.some(col => String(r[col.key] || '').trim() !== '')
-      );
-    }
-
-    const processData = () => {
-      try {
-        const azelisCols = tableDefs.azelis.columns;
-        const supplierCols = tableDefs.supplier.columns;
-        const logisticCols = tableDefs.logistic.columns;
-        const packweightCols = tableDefs.packweight.columns;
-        const palletPackCols = tableDefs.palletpack.columns; // new
-
-        const cleanAzelis = cleanRows(azelisData, azelisCols);
-        const cleanSupplier = cleanRows(supplierData, supplierCols);
-        const cleanLogistic = cleanRows(logisticData, logisticCols);
-        const cleanPackweight = cleanRows(packweightData, packweightCols);
-        const cleanPalletPack = cleanRows(palletPackData, palletPackCols); // new
-
-        // parse the threshold from user input
-        const thresholdVal = parseFloat(descThreshold) || 90;
-
-        const finalRows = processDataframes(
-          cleanAzelis,
-          cleanSupplier,
-          cleanLogistic,
-          cleanPackweight,
-          thresholdVal,
-          cleanPalletPack // pass the new data
-        );
-
-        setResults(finalRows);
-        setError('');
-      } catch (err) {
-        setError('Error processing data: ' + err.message);
-      }
-    };
-
-    const exportResults = () => {
-      if (results.length === 0) return;
-      const ws = XLSX.utils.json_to_sheet(results);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Results");
-      XLSX.writeFile(wb, "match_results.xlsx");
-    };
-
-    const resetAll = () => {
-      setAzelisData(createRows(tableDefs.azelis.columns));
-      setSupplierData(createRows(tableDefs.supplier.columns));
-      setLogisticData(createRows(tableDefs.logistic.columns, 200));
-      setPackweightData(createRows(tableDefs.packweight.columns, 200));
-      setPalletPackData(createRows(tableDefs.palletpack.columns, 200));
-      setResults([]);
-      setError('');
-    };
-
-    const currentTab = getActiveTable();
-
-    return (
-      <div className="max-w-full p-4">
-        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <h1 className="text-2xl font-bold mb-4">Match App (Editable Threshold + Pallet/Pack Tab)</h1>
-
-          <div className="mb-4">
-            <label htmlFor="descThreshold" className="mr-2 font-semibold">
-              Description Score Threshold:
-            </label>
-            <input
-              id="descThreshold"
-              type="number"
-              step="1"
-              min="0"
-              max="100"
-              className="border px-2 py-1 w-20"
-              value={descThreshold}
-              onChange={(e) => setDescThreshold(e.target.value)}
-            />
-            <span className="ml-2 text-sm text-gray-600">
-              (Default 90. Raise for stricter matching, lower for more lenient.)
-            </span>
-          </div>
-
-          <div className="flex gap-4 mb-4">
-            <button
-              onClick={processData}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-            >
-              Process Data
-            </button>
-            <button
-              onClick={exportResults}
-              disabled={results.length === 0}
-              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700
-                        disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Export Results
-            </button>
-            <button
-              onClick={resetAll}
-              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-            >
-              Reset
-            </button>
-            <button
-              onClick={() => window.location.href = 'supplier-extractor.html'}
-              className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
-            >
-              Extract Supplier Data
-            </button>
-          </div>
-         
-          {error && <Alert>{error}</Alert>}
-
-          <div className="mb-4">
-            <div className="border-b border-gray-200">
-              <nav className="-mb-px flex space-x-8">
-                {Object.keys(tableDefs).map(tab => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`border-b-2 px-1 py-4 text-sm font-medium
-                      ${activeTab === tab
-                        ? 'border-blue-500 text-blue-600'
-                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                      }`}
-                  >
-                    {tab.charAt(0).toUpperCase() + tab.slice(1)} Data
-                  </button>
-                ))}
-              </nav>
-            </div>
-
-            <div className="mt-4">
-              <div className="mb-2 text-sm text-gray-600">
-                Tip: Paste data directly from Excel. Select the cell in the table where you want to start.
-              </div>
-              <EditableTable
-                columns={currentTab.columns}
-                data={currentTab.data}
-                setData={currentTab.setData}
-              />
-              <div className="mt-2">
-                <button
-                  onClick={addRow}
-                  className="px-2 py-1 bg-gray-200 text-sm rounded hover:bg-gray-300"
-                >
-                  + Add Row
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {results.length > 0 && (
-            <div className="mt-4 overflow-x-auto">
-              <h2 className="text-xl font-bold mb-2">Results</h2>
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    {Object.keys(results[0]).map(header => (
-                      <th
-                        key={header}
-                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {results.map((row, idx) => (
+                  <tr key={idx}>
+                    {Object.entries(row).map(([key, value]) => (
+                      <td
+                        key={key}
+                        className="px-6 py-4 whitespace-nowrap text-sm text-gray-500"
                       >
-                        {header}
-                      </th>
+                        {value}
+                      </td>
                     ))}
                   </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {results.map((row, idx) => (
-                    <tr key={idx}>
-                      {Object.entries(row).map(([key, value]) => (
-                        <td
-                          key={key}
-                          className="px-6 py-4 whitespace-nowrap text-sm text-gray-500"
-                        >
-                          {value}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-        <div className="text-sm text-gray-500">Created by You (with enhancements)</div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
-    );
-  };
+      <div className="text-sm text-gray-500">Created by You (multi‐pallet breaks)</div>
+    </div>
+  );
+};
 
-  ReactDOM.render(<MatchApp />, document.getElementById('root'));
-  </script>
+ReactDOM.render(<MatchApp />, document.getElementById('root'));
+
+</script>
 </body>
 </html>
