@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Match App with Multi-Pallet/Pack Ranges</title>
+  <title>Lightweight Multi-Pallet/Pack Match App</title>
   <!-- Tailwind CSS from CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- React, ReactDOM, and Babel from CDN -->
@@ -20,30 +20,23 @@
       font-family: sans-serif;
       background-color: #f9fafb; /* Tailwind gray-50 */
     }
-    /* Make the read-only input background a bit lighter */
-    input[readonly] {
-      background-color: #f0f0f0;
-      color: #666;
-      cursor: not-allowed;
-    }
   </style>
 </head>
 <body>
 <div id="root"></div>
 
 <script type="text/babel">
-
 /***************************************************************************
  * 1) Utility Functions
  ***************************************************************************/
 
-// Safely parse a string or number to float. Returns null if invalid.
+// Safely parse to float. Returns null if invalid.
 function floatify(val) {
   const num = parseFloat(val);
   return isNaN(num) ? null : num;
 }
 
-// Example: If "Azelis Code" includes "123KG", parse out "123"
+// Extract numeric portion from code, e.g. "ABC123KG" => 123
 function splitData(s) {
   const str = String(s);
   const match = str.match(/(\d+)(?=KG)/i);
@@ -53,7 +46,7 @@ function splitData(s) {
   return null;
 }
 
-// Jaro–Winkler distance (0..1)
+// Jaro–Winkler distance
 function jaroWinkler(str1, str2) {
   const s1 = str1.toLowerCase().trim();
   const s2 = str2.toLowerCase().trim();
@@ -117,7 +110,6 @@ function cleanString(str) {
 function fallbackWordAbbrevScore(azDescClean, supDescClean, jwSimilarityPct) {
   const azTokens = azDescClean.split(' ');
   const supTokens = supDescClean.split(' ');
-
   const azSet = new Set(azTokens);
   const supSet = new Set(supTokens);
   const commonWords = [...azSet].filter(x => supSet.has(x));
@@ -137,12 +129,7 @@ function fallbackWordAbbrevScore(azDescClean, supDescClean, jwSimilarityPct) {
   return fallbackScore > 99 ? 99 : fallbackScore;
 }
 
-/**
- * Scoring function. 
- *   - If JW < 0.50 => descScore=0
- *   - If JW >= 0.98 => descScore=100
- *   - Otherwise => fallback partial
- */
+// Final desc + weight scoring
 function calculateAllScores(azDesc, azWeight, supDesc, supWeight) {
   const azClean = cleanString(azDesc);
   const supClean = cleanString(supDesc);
@@ -162,7 +149,6 @@ function calculateAllScores(azDesc, azWeight, supDesc, supWeight) {
   }
 
   const wScore = weightScore(azWeight, supWeight);
-
   const total = 0.7 * descScore + 0.3 * wScore;
   return [
     parseFloat(descScore.toFixed(2)),
@@ -185,10 +171,10 @@ function weightScore(azWeight, supWeight) {
 }
 
 /***************************************************************************
- * Surcharges & PalletPack expansions
+ * 2) Surcharges & Multi-Pallet expansions
  ***************************************************************************/
 
-// 1) Pack Weight Surcharges
+// A) Pack Weight Surcharges
 function applyPackWeightSurcharges(lineObj, packweightRows) {
   if (!packweightRows || packweightRows.length === 0) {
     return lineObj;
@@ -218,7 +204,7 @@ function applyPackWeightSurcharges(lineObj, packweightRows) {
   return lineObj;
 }
 
-// 2) Logistic Surcharges
+// B) Logistic Surcharges
 function applyLogisticSurcharges(lineObj, logisticRows) {
   if (!logisticRows || logisticRows.length === 0) {
     return [lineObj];
@@ -243,12 +229,11 @@ function applyLogisticSurcharges(lineObj, logisticRows) {
     if (lFrom === null) lFrom = -Infinity;
     if (lTo === null) lTo = Infinity;
 
-    // If logistic range matches the supplier's range, add to main line
     if (lFrom === supFrom && lTo === supTo) {
       basePrice += addVal;
       logisticSum += addVal;
     } else {
-      // Create a new line for an extra logistic break
+      // Create a new line for the extra logistic break
       const newLine = { ...mainLine };
       let newPrice = floatify(newLine['Matched Supplier Price']) || 0;
       newPrice += addVal;
@@ -256,7 +241,6 @@ function applyLogisticSurcharges(lineObj, logisticRows) {
       newLine['Matched Supplier To'] = `(Extra Logistic) ${lTo}`;
       newLine['Matched Supplier Price'] = parseFloat(newPrice.toFixed(2));
       newLine['Logistic Surcharge'] = parseFloat(addVal.toFixed(2));
-      // Clear these scores so we don't sum them up incorrectly
       newLine['Description Match Score'] = '';
       newLine['Weight Match Score'] = '';
       newLine['Total Score'] = '';
@@ -272,19 +256,20 @@ function applyLogisticSurcharges(lineObj, logisticRows) {
   return lines;
 }
 
-// 3) Pallet/Pack expansions with multiple breaks in one row
+// C) Multi-Pallet expansions with multiple breaks in one row
 /**
- * We have columns:
+ * We'll have columns:
  *   - Supplier Description
  *   - Pack Weight
  *   - Pallet Factor
- *   - Weight Per Pallet (computed = Pack Weight * Pallet Factor)
  *   - Then for i=1..10 => Pallet From i, Pallet To i, Price i
  *
- * For each row in the "palletpack" table, if the "Supplier Description" matches
- * the line's "Matched Supplier Description", we parse the 10 sets of from/to/price.
- * If not blank, we create a new line. 
- * We multiply "pallet from" and "pallet to" by "weight per pallet" to get fromKG..toKG range.
+ * We do NOT store "Weight Per Pallet" in the table. We compute it on the fly:
+ *   weightPerPallet = packWeight * palletFactor
+ *
+ * For each row that matches, we parse the 10 sets of from/to/price. 
+ * If non-empty, we create a new line with “(PalletBreak) fromKG..toKG” 
+ * and set that price.  
  */
 function applyMultiPalletPackBreaks(lineObj, palletpackRows) {
   if (!palletpackRows || palletpackRows.length === 0) {
@@ -306,47 +291,36 @@ function applyMultiPalletPackBreaks(lineObj, palletpackRows) {
     return [lineObj];
   }
 
-  // We'll create "base line" plus extra lines
-  const lines = [];
-  const baseLine = { ...lineObj };
-  lines.push(baseLine);
+  // We'll keep the base line, plus any new lines from breaks
+  const lines = [ lineObj ];
 
-  // For each relevant row, parse up to 10 sets
-  relevant.forEach(pp => {
-    const packWt = floatify(pp['Pack Weight']) || 0;
-    const palFactor = floatify(pp['Pallet Factor']) || 0;
-    // The user wants a "visual" on weight per pallet => packWt * palFactor
-    const weightPerPallet = packWt * palFactor;
+  for (let row of relevant) {
+    const packWt = floatify(row['Pack Weight']) || 0;
+    const palFactor = floatify(row['Pallet Factor']) || 0;
+    // We'll compute weight per pallet once
+    const weightPerPallet = packWt * palFactor; 
 
-    // Now for i in [1..10], parse from/to/price
+    // For i in [1..10], parse from/to/price
     for (let i = 1; i <= 10; i++) {
       const fKey = `Pallet From ${i}`;
       const tKey = `Pallet To ${i}`;
       const pKey = `Price ${i}`;
 
-      const palFromVal = floatify(pp[fKey]);
-      const palToVal = floatify(pp[tKey]);
-      const priceVal = floatify(pp[pKey]);
+      const palFromVal = floatify(row[fKey]);
+      const palToVal = floatify(row[tKey]);
+      const priceVal = floatify(row[pKey]);
 
-      // If any is non-null, we treat it as a valid break row
+      // If all three are non-null, we treat it as a valid break
       if (palFromVal !== null && palToVal !== null && priceVal !== null) {
-        // Create a new line 
-        const newLine = { ...lineObj };
-
-        // Convert pallet range to kg range
         let fromKG = palFromVal * weightPerPallet;
         let toKG = palToVal * weightPerPallet;
-
-        // We'll just store that price as a "Matched Supplier Price"
-        // You can decide if it's total or per-kg. 
+        
+        const newLine = { ...lineObj };
         newLine['Matched Supplier From'] = `(PalletBreak) ${fromKG}`;
         newLine['Matched Supplier To'] = `(PalletBreak) ${toKG}`;
         newLine['Matched Supplier Price'] = parseFloat(priceVal.toFixed(2));
+        newLine['PalletPack Info'] = `pack=${packWt}, factor=${palFactor}, from=${palFromVal}..${palToVal} => ${fromKG}..${toKG} kg at $${priceVal}`;
 
-        // We'll store info in a new field
-        newLine['PalletPack Info'] = `Row with pack=${packWt}, factor=${palFactor}, from=${palFromVal}..${palToVal} => ${fromKG}..${toKG} kg at $${priceVal}`;
-
-        // Clear match scores to avoid summing incorrectly
         newLine['Description Match Score'] = '';
         newLine['Weight Match Score'] = '';
         newLine['Total Score'] = '';
@@ -354,18 +328,14 @@ function applyMultiPalletPackBreaks(lineObj, palletpackRows) {
         lines.push(newLine);
       }
     }
-  });
+  }
 
   return lines;
 }
 
 /***************************************************************************
- * 2) Core “Process DataFrames” Logic
+ * 3) Core “Process DataFrames” Logic
  ***************************************************************************/
-
-/**
- * We'll compare dScore >= descThreshold to decide if the supplier group is "good enough."
- */
 function processDataframes(
   azelisRows,
   supplierRows,
@@ -407,13 +377,14 @@ function processDataframes(
     'Additional Charge': floatify(r['Additional Charge']) || 0
   }));
 
-  // 5) Clean palletpack: We'll keep them as strings, parse later
-  //    Actually let's store them as strings so we can parse from/to/price easily
-  //    in applyMultiPalletPackBreaks. We'll only skip rows that are fully blank.
+  // 5) Clean palletpack
   const cleanPalletPack = palletpackRows.filter(r =>
+    // Keep if "Supplier Description" & "Pack Weight" or "Pallet Factor" or any of the break columns are non-empty
     (r['Supplier Description'] !== '' && r['Pack Weight'] !== '') ||
     (r['Pallet Factor'] !== '') ||
-    Array.from({length:10}).some((_,i)=> r[`Pallet From ${i+1}`] || r[`Pallet To ${i+1}`] || r[`Price ${i+1}`])
+    Array.from({length:10}).some((_,i)=>
+      r[`Pallet From ${i+1}`] || r[`Pallet To ${i+1}`] || r[`Price ${i+1}`]
+    )
   );
 
   // Group Azelis by desc
@@ -444,7 +415,7 @@ function processDataframes(
     let bestMatches = [];
     let bestScore = -1;
 
-    // Find which supplier desc passes the threshold
+    // find which supplier desc passes threshold
     for (let [supDesc, supRows] of Object.entries(supplierGroups)) {
       const [dScore] = calculateAllScores(azDesc, null, supDesc, null);
       if (dScore >= scoreThreshold) {
@@ -479,7 +450,7 @@ function processDataframes(
       continue;
     }
 
-    // Next, group the bestMatches by desc+weight
+    // Next group the bestMatches by desc+weight
     const descWeightGroups = {};
     for (let supRow of bestMatches) {
       const supDesc = (supRow['Supplier Description'] || '').toLowerCase();
@@ -512,32 +483,27 @@ function processDataframes(
 
         if (azWeight !== null && supWt !== null) {
           const weightDiff = Math.abs(azWeight - supWt);
-          // Priority 1: exact desc match
           if (dScore === 100 && (bestDescScore !== 100 || weightDiff < bestWeightDiff)) {
             bestWeightDiff = weightDiff;
             bestGroupKey = groupKey;
             bestDescScore = dScore;
-          }
-          // Priority 2: better desc score
-          else if (dScore > bestDescScore) {
+          } else if (dScore > bestDescScore) {
             bestWeightDiff = weightDiff;
             bestGroupKey = groupKey;
             bestDescScore = dScore;
-          }
-          // Priority 3: same desc score but better weight match
-          else if (dScore === bestDescScore && weightDiff < bestWeightDiff) {
+          } else if (dScore === bestDescScore && weightDiff < bestWeightDiff) {
             bestWeightDiff = weightDiff;
             bestGroupKey = groupKey;
             bestDescScore = dScore;
           }
         } else if (dScore > bestDescScore) {
-          // handle cases where weights are null
           bestGroupKey = groupKey;
           bestDescScore = dScore;
         }
       }
 
       if (bestGroupKey) {
+        // For each supRow in that group
         for (let supRow of descWeightGroups[bestGroupKey]) {
           const supWeight = supRow['Weight'];
           const supDesc = supRow['Supplier Description'];
@@ -570,14 +536,14 @@ function processDataframes(
             'Total Score': tScore
           };
 
-          // (A) Apply pack weight surcharges
+          // Pack Weight Surcharges
           lineObj = applyPackWeightSurcharges(lineObj, cleanPackWeight);
 
-          // (B) Apply logistic surcharges
+          // Logistic Surcharges
           let linesAfterLogistics = [];
           const logisticResults = applyLogisticSurcharges(lineObj, cleanLogistic);
 
-          // (C) For each logistic line, also apply multi pallet/pack breaks
+          // Multi pallet/pack expansions
           for (let logLine of logisticResults) {
             const multiBreakLines = applyMultiPalletPackBreaks(logLine, cleanPalletPack);
             linesAfterLogistics.push(...multiBreakLines);
@@ -586,6 +552,7 @@ function processDataframes(
           finalRows.push(...linesAfterLogistics);
         }
       } else {
+        // "No Weight Match Found"
         finalRows.push({
           'Azelis Code': azRow['Azelis Code'] || '',
           'Azelis Description': azRow['Azelis Description'] || '',
@@ -611,7 +578,7 @@ function processDataframes(
 }
 
 /***************************************************************************
- * 3) EditableTable + Main React App
+ * 4) EditableTable + Main React App
  ***************************************************************************/
 
 const Alert = ({ children }) => {
@@ -622,7 +589,7 @@ const Alert = ({ children }) => {
   );
 };
 
-// A small utility to generate [From i, To i, Price i] columns for i in [1..10]
+// Generate [From i, To i, Price i] columns for i=1..10
 function generatePalletBreakColumns() {
   const cols = [];
   for (let i = 1; i <= 10; i++) {
@@ -634,12 +601,11 @@ function generatePalletBreakColumns() {
 }
 
 const EditableTable = ({ columns, data, setData }) => {
-  // We can do onPaste for multi-line paste
+  // Multi-line paste
   const handlePaste = (e, rowIndex, colIndex) => {
     e.preventDefault();
     const pastedText = e.clipboardData.getData('text');
     const rows = pastedText.split(/\r\n|\n|\r/).filter(row => row.trim());
-    
     // Split each row by tabs or multiple spaces
     const pastedData = rows.map(row => row.split(/\t|\s{2,}/));
 
@@ -672,7 +638,7 @@ const EditableTable = ({ columns, data, setData }) => {
   };
 
   return (
-    <div className="border rounded" style={{ height: '600px' }}>
+    <div className="border rounded" style={{ height: '400px' }}>
       <div className="overflow-auto h-full">
         <table className="w-full table-fixed bg-white">
           <thead className="sticky top-0 bg-gray-50 z-10">
@@ -696,10 +662,9 @@ const EditableTable = ({ columns, data, setData }) => {
                     <input
                       type="text"
                       value={row[col.key] || ''}
-                      readOnly={col.readOnly}
                       onChange={(e) => handleChange(r, col.key, e.target.value)}
                       onPaste={(e) => handlePaste(e, r, c)}
-                      className="w-full h-8 px-2 border-0 focus:ring-1 focus:ring-blue-500 focus:ring-opacity-50 focus:outline-none"
+                      className="w-full h-8 px-2 border-0 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                     />
                   </td>
                 ))}
@@ -716,19 +681,16 @@ const MatchApp = () => {
   const [activeTab, setActiveTab] = React.useState('azelis');
   const [error, setError] = React.useState('');
   const [results, setResults] = React.useState([]);
-
-  // Description threshold
   const [descThreshold, setDescThreshold] = React.useState(90);
 
-  // Create default rows
-  const createRows = (cols, count=500) => {
+  // We'll reduce the default row counts from hundreds to lighten the load
+  const createRows = (cols, count=50) => {
     const emptyRow = {};
     cols.forEach(c => { emptyRow[c.key] = ''; });
     return Array.from({ length: count }, () => ({ ...emptyRow }));
   };
 
-  // 5 tabs: azelis, supplier, logistic, packweight, palletpack
-  // We'll define the extra columns for palletpack, including up to 10 breaks
+  // 5 tabs with fewer default rows
   const palletBreakCols = generatePalletBreakColumns();
 
   const tableDefs = {
@@ -741,96 +703,62 @@ const MatchApp = () => {
     supplier: {
       columns: [
         { key: 'Supplier Description', label: 'Supplier Description', width: '300px' },
-        { key: 'SKU', label: 'SKU' },
-        { key: 'Weight', label: 'Weight' },
-        { key: 'Price', label: 'Price' },
-        { key: 'From', label: 'From' },
-        { key: 'To', label: 'To' }
+        { key: 'SKU', label: 'SKU', width: '90px' },
+        { key: 'Weight', label: 'Weight', width: '90px' },
+        { key: 'Price', label: 'Price', width: '90px' },
+        { key: 'From', label: 'From', width: '90px' },
+        { key: 'To', label: 'To', width: '90px' }
       ]
     },
     logistic: {
       columns: [
-        { key: 'Logistic From', label: 'Logistic From' },
-        { key: 'Logistic To', label: 'Logistic To' },
-        { key: 'Additional Charge', label: 'Additional Charge' }
+        { key: 'Logistic From', label: 'Logistic From', width: '120px' },
+        { key: 'Logistic To', label: 'Logistic To', width: '120px' },
+        { key: 'Additional Charge', label: 'Additional Charge', width: '120px' }
       ]
     },
     packweight: {
       columns: [
-        { key: 'Pack From', label: 'Pack From' },
-        { key: 'Pack To', label: 'Pack To' },
-        { key: 'Additional Charge', label: 'Additional Charge' }
+        { key: 'Pack From', label: 'Pack From', width: '120px' },
+        { key: 'Pack To', label: 'Pack To', width: '120px' },
+        { key: 'Additional Charge', label: 'Additional Charge', width: '120px' }
       ]
     },
     palletpack: {
       columns: [
-        { key: 'Supplier Description', label: 'Supplier Desc', width: '200px' },
+        { key: 'Supplier Description', label: 'Supplier Desc', width: '180px' },
         { key: 'Pack Weight', label: 'Pack Weight', width: '100px' },
         { key: 'Pallet Factor', label: 'Pallet Factor', width: '100px' },
-        // (We won't store weight per pallet as an input column, 
-        // because we can compute it or show it in results. 
-        // If you want a read-only column for "Weight Per Pallet", you can add it. 
-        // For demonstration, let's do so:)
-        { key: 'Weight Per Pallet', label: 'W/Pal (auto)', width: '100px', readOnly: true },
-        ...palletBreakCols // 30 columns for 10 breaks
+        ...palletBreakCols // 30 columns for the 10 breaks
       ]
     }
   };
 
-  // State for each table
   const [azelisData, setAzelisData] = React.useState(createRows(tableDefs.azelis.columns));
   const [supplierData, setSupplierData] = React.useState(createRows(tableDefs.supplier.columns));
-  const [logisticData, setLogisticData] = React.useState(createRows(tableDefs.logistic.columns, 200));
-  const [packweightData, setPackweightData] = React.useState(createRows(tableDefs.packweight.columns, 200));
-  const [palletPackData, setPalletPackData] = React.useState(createRows(tableDefs.palletpack.columns, 200));
-
-  // The function to handle any "readOnly" columns for palletpack: 
-  // we'll recalc "Weight Per Pallet" = packWeight * palletFactor
-  // We'll do a small effect that scans the palletpackData and updates the "Weight Per Pallet" column
-  React.useEffect(() => {
-    setPalletPackData(old => {
-      return old.map(row => {
-        const pw = floatify(row['Pack Weight']);
-        const pf = floatify(row['Pallet Factor']);
-        let wpp = '';
-        if (pw !== null && pf !== null) {
-          wpp = (pw * pf).toString();
-        }
-        return { ...row, ['Weight Per Pallet']: wpp };
-      });
-    });
-  }, [palletPackData]);
+  const [logisticData, setLogisticData] = React.useState(createRows(tableDefs.logistic.columns, 20));
+  const [packweightData, setPackweightData] = React.useState(createRows(tableDefs.packweight.columns, 20));
+  const [palletPackData, setPalletPackData] = React.useState(createRows(tableDefs.palletpack.columns, 20));
 
   const addRow = () => {
     switch (activeTab) {
-      case 'azelis':
-        setAzelisData(current => [...current, {}]);
-        break;
-      case 'supplier':
-        setSupplierData(current => [...current, {}]);
-        break;
-      case 'logistic':
-        setLogisticData(current => [...current, {}]);
-        break;
-      case 'packweight':
-        setPackweightData(current => [...current, {}]);
-        break;
-      case 'palletpack':
-        setPalletPackData(current => [...current, {}]);
-        break;
-      default:
-        break;
+      case 'azelis': setAzelisData(current => [...current, {}]); break;
+      case 'supplier': setSupplierData(current => [...current, {}]); break;
+      case 'logistic': setLogisticData(current => [...current, {}]); break;
+      case 'packweight': setPackweightData(current => [...current, {}]); break;
+      case 'palletpack': setPalletPackData(current => [...current, {}]); break;
+      default: break;
     }
   };
 
   const getActiveTable = () => {
     switch (activeTab) {
-      case 'azelis': return { data: azelisData, setData: setAzelisData, columns: tableDefs.azelis.columns };
-      case 'supplier': return { data: supplierData, setData: setSupplierData, columns: tableDefs.supplier.columns };
-      case 'logistic': return { data: logisticData, setData: setLogisticData, columns: tableDefs.logistic.columns };
+      case 'azelis':     return { data: azelisData, setData: setAzelisData, columns: tableDefs.azelis.columns };
+      case 'supplier':   return { data: supplierData, setData: setSupplierData, columns: tableDefs.supplier.columns };
+      case 'logistic':   return { data: logisticData, setData: setLogisticData, columns: tableDefs.logistic.columns };
       case 'packweight': return { data: packweightData, setData: setPackweightData, columns: tableDefs.packweight.columns };
       case 'palletpack': return { data: palletPackData, setData: setPalletPackData, columns: tableDefs.palletpack.columns };
-      default: return { data: [], setData: () => {}, columns: [] };
+      default:           return { data: [], setData: () => {}, columns: [] };
     }
   };
 
@@ -843,11 +771,11 @@ const MatchApp = () => {
 
   const processData = () => {
     try {
-      const azelisCols = tableDefs.azelis.columns;
-      const supplierCols = tableDefs.supplier.columns;
-      const logisticCols = tableDefs.logistic.columns;
-      const packweightCols = tableDefs.packweight.columns;
-      const palletPackCols = tableDefs.palletpack.columns;
+      const { columns: azelisCols }     = tableDefs.azelis;
+      const { columns: supplierCols }   = tableDefs.supplier;
+      const { columns: logisticCols }   = tableDefs.logistic;
+      const { columns: packweightCols } = tableDefs.packweight;
+      const { columns: palletPackCols } = tableDefs.palletpack;
 
       const cleanAzelis = cleanRows(azelisData, azelisCols);
       const cleanSupplier = cleanRows(supplierData, supplierCols);
@@ -855,7 +783,6 @@ const MatchApp = () => {
       const cleanPackweight = cleanRows(packweightData, packweightCols);
       const cleanPalletPack = cleanRows(palletPackData, palletPackCols);
 
-      // parse the threshold from user input
       const thresholdVal = parseFloat(descThreshold) || 90;
 
       const finalRows = processDataframes(
@@ -885,9 +812,9 @@ const MatchApp = () => {
   const resetAll = () => {
     setAzelisData(createRows(tableDefs.azelis.columns));
     setSupplierData(createRows(tableDefs.supplier.columns));
-    setLogisticData(createRows(tableDefs.logistic.columns, 200));
-    setPackweightData(createRows(tableDefs.packweight.columns, 200));
-    setPalletPackData(createRows(tableDefs.palletpack.columns, 200));
+    setLogisticData(createRows(tableDefs.logistic.columns, 20));
+    setPackweightData(createRows(tableDefs.packweight.columns, 20));
+    setPalletPackData(createRows(tableDefs.palletpack.columns, 20));
     setResults([]);
     setError('');
   };
@@ -897,7 +824,7 @@ const MatchApp = () => {
   return (
     <div className="max-w-full p-4">
       <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-        <h1 className="text-2xl font-bold mb-4">Match App (Multi-Pallet Ranges)</h1>
+        <h1 className="text-2xl font-bold mb-4">Lightweight Multi-Pallet/Pack Match App</h1>
 
         <div className="mb-4">
           <label htmlFor="descThreshold" className="mr-2 font-semibold">
@@ -1022,13 +949,14 @@ const MatchApp = () => {
           </div>
         )}
       </div>
-      <div className="text-sm text-gray-500">Created by You (multi‐pallet breaks)</div>
+      <div className="text-sm text-gray-500">
+        Created by You (lighter multi‐pallet app)
+      </div>
     </div>
   );
 };
 
 ReactDOM.render(<MatchApp />, document.getElementById('root'));
-
 </script>
 </body>
 </html>
